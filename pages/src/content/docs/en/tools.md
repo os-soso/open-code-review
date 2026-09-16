@@ -330,10 +330,11 @@ When there are no matches, the tool returns the literal string
 
 ### Limits
 
-- Caps matches at **100 per file** via `git grep --max-count 100`, so
-  total output across many files can exceed 100. When the per-file cap
-  is hit the output is prefixed with `Note: The results have been
-  truncated. Only showing first 100 results.`.
+- Caps output at **100 result lines in total**. `git grep --max-count` is a
+  per-file limit, so the provider asks git for one row more than the cap per
+  file and keeps only the first 100 lines across all files; when more than
+  100 lines came back the output is prefixed with `Note: The results have
+  been truncated. Only showing first 100 results.`.
 - Empty / whitespace-only `search_text` returns `Error: search_text is
   blank` instead of expanding to every line.
 - Searches the **current working tree** in workspace mode, or the

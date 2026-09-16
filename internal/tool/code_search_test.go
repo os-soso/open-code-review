@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -402,6 +403,111 @@ func TestGitGrep_WorkspaceMode_UntrackedFile(t *testing.T) {
 	}
 	if !strings.Contains(result, "untracked.go") {
 		t.Errorf("expected untracked.go in result, got: %s", result)
+	}
+}
+
+// TestBuildGrepArgs_MaxCountLookahead pins the one-row lookahead in the
+// --max-count argument: git's --max-count limits matches PER FILE, not in
+// total, so gitGrep enforces the total cap itself and asks git for one row
+// beyond gitGrepMaxCount per file to tell a genuinely truncated result from
+// exactly gitGrepMaxCount matches.
+func TestBuildGrepArgs_MaxCountLookahead(t *testing.T) {
+	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
+	args := p.buildGrepArgs("foo", false, false, false, nil)
+
+	assertContainsInOrder(t, args, "--max-count", strconv.Itoa(gitGrepMaxCount+1))
+}
+
+// countMatchLines counts the result rows of a gitGrep result, i.e. the
+// "<lineNum>|<content>" lines. The "File:" and "Match lines:" headers, the
+// truncation note and the blank separators between file blocks carry no line
+// number before a '|' and are therefore not counted.
+func countMatchLines(t *testing.T, result string) int {
+	t.Helper()
+	count := 0
+	for _, line := range strings.Split(result, "\n") {
+		pipe := strings.Index(line, "|")
+		if pipe < 0 {
+			continue
+		}
+		if _, err := strconv.Atoi(line[:pipe]); err != nil {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+// TestGitGrep_CapsTotalResultsAcrossFiles is the regression guard for the
+// total-result cap: because --max-count is a per-file limit, a pattern
+// matching in several files used to return up to gitGrepMaxCount rows per
+// file under a note claiming only the first gitGrepMaxCount were shown.
+func TestGitGrep_CapsTotalResultsAcrossFiles(t *testing.T) {
+	tests := []struct {
+		name      string
+		files     int
+		hitsPer   int
+		wantLines int
+		wantNote  bool
+	}{
+		{
+			name:      "three files of sixty hits are capped at one hundred",
+			files:     3,
+			hitsPer:   60,
+			wantLines: gitGrepMaxCount,
+			wantNote:  true,
+		},
+		{
+			name:      "exactly one hundred hits in one file pass through without a note",
+			files:     1,
+			hitsPer:   gitGrepMaxCount,
+			wantLines: gitGrepMaxCount,
+			wantNote:  false,
+		},
+		{
+			name:      "one hundred and one hits in one file are capped with a note",
+			files:     1,
+			hitsPer:   gitGrepMaxCount + 1,
+			wantLines: gitGrepMaxCount,
+			wantNote:  true,
+		},
+		{
+			name:      "forty hits across two files pass through without a note",
+			files:     2,
+			hitsPer:   20,
+			wantLines: 40,
+			wantNote:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := setupTestRepo(t)
+			// The needle files stay untracked on purpose: workspace mode
+			// reaches them through --untracked, and "needle" matches nothing
+			// in the committed fixtures, so the totals asserted below are
+			// exactly files x hitsPer.
+			for i := 0; i < tt.files; i++ {
+				path := filepath.Join(dir, "needle"+strconv.Itoa(i)+".txt")
+				if err := os.WriteFile(path, []byte(strings.Repeat("needle line\n", tt.hitsPer)), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+			result, err := p.gitGrep(context.Background(), "needle", true, false, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if got := countMatchLines(t, result); got != tt.wantLines {
+				t.Errorf("emitted %d match lines, want %d", got, tt.wantLines)
+			}
+			hasNote := strings.HasPrefix(result, "Note: The results have been truncated.")
+			if hasNote != tt.wantNote {
+				t.Errorf("truncation note present = %v, want %v; output:\n%s", hasNote, tt.wantNote, result)
+			}
+		})
 	}
 }
 
