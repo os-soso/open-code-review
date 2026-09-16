@@ -300,8 +300,8 @@ Match lines: 1
 
 ### 限制
 
-- 通过 `git grep --max-count 100` 把每文件命中数上限设为 **100**，因此跨多文件的
-  总输出可能超过 100。触及每文件上限时，输出前会加
+- 输出总量上限为 **100 行结果**。`git grep --max-count` 是每文件的限制，因此工具向 git
+  请求每文件比上限多一行，并只保留跨所有文件的前 100 行；当返回的结果超过 100 行时，输出前会加
   `Note: The results have been truncated. Only showing first 100 results.`。
 - 空 / 仅空白的 `search_text` 返回 `Error: search_text is blank`，而不是展开成
   每一行。
