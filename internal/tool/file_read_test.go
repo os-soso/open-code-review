@@ -438,6 +438,194 @@ func TestExecute_DefaultStartLine(t *testing.T) {
 // setupTestRepo is already defined in code_search_test.go (same package)
 // getHeadCommit is already defined in code_search_test.go (same package)
 
+// assertSecretRefusal checks that a file_read result is the credential
+// refusal and that not one byte of the file came back with it.
+func assertSecretRefusal(t *testing.T, result, filePath, secretMarker string) {
+	t.Helper()
+	if !strings.HasPrefix(result, "Error: file_path") || !strings.Contains(result, "secret-path policy") {
+		t.Fatalf("Execute(%q) = %q, want the secret-path refusal", filePath, result)
+	}
+	if strings.Contains(result, secretMarker) {
+		t.Fatalf("Execute(%q) leaked credential content: %q", filePath, result)
+	}
+	// The refusal replaces the whole result, so none of the reader's own
+	// framing (which only exists when a file was actually read) may appear.
+	if strings.Contains(result, "IS_TRUNCATED") || strings.Contains(result, "LINE_RANGE") {
+		t.Fatalf("Execute(%q) = %q, want no file framing in a refusal", filePath, result)
+	}
+}
+
+// TestExecute_RefusesSecretPath covers the credential denylist at the tool
+// boundary: file_path is chosen by the model, so a prompt in a reviewed
+// repository must not be able to have .env, .npmrc or an SSH key read out and
+// forwarded to the LLM. Every spelling of the same path is refused, because a
+// refusal that only recognizes the canonical form is not a control.
+func TestExecute_RefusesSecretPath(t *testing.T) {
+	const secretMarker = "SECRET-VALUE-MUST-NOT-LEAK"
+	dir := t.TempDir()
+	writeTestFile(t, dir, ".env", "TOKEN="+secretMarker+"\n")
+	writeTestFile(t, dir, ".npmrc", "//registry.example.com/:_authToken="+secretMarker+"\n")
+	if err := os.Mkdir(filepath.Join(dir, ".ssh"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, dir, filepath.Join(".ssh", "id_rsa"), "PRIVATE KEY "+secretMarker+"\n")
+	writeTestFile(t, dir, filepath.Join(".ssh", "config"), "Host example "+secretMarker+"\n")
+
+	p := NewFileRead(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+
+	paths := []string{
+		".env",
+		"./.env",
+		"src/../.env",
+		"/.env",
+		".ENV",
+		".npmrc",
+		".ssh/id_rsa",
+		".ssh/config",
+	}
+	for _, filePath := range paths {
+		t.Run(filePath, func(t *testing.T) {
+			result, err := p.Execute(context.Background(), map[string]any{"file_path": filePath})
+			if err != nil {
+				t.Fatalf("Execute(%q) error = %v, want a refusal result and no error", filePath, err)
+			}
+			assertSecretRefusal(t, result, filePath, secretMarker)
+		})
+	}
+}
+
+// TestExecute_RefusesSecretPathInRefModes pins that the policy sits ahead of
+// the mode switch: reading at a ref goes through `git show` instead of the
+// filesystem, and that path must refuse a credential file just the same.
+func TestExecute_RefusesSecretPathInRefModes(t *testing.T) {
+	const secretMarker = "COMMITTED-SECRET-MUST-NOT-LEAK"
+	dir := setupTestRepo(t)
+	writeTestFile(t, dir, ".env", "TOKEN="+secretMarker+"\n")
+	commitWorktree(t, dir, "add env")
+	commit := getHeadCommit(t, dir)
+
+	modes := []struct {
+		name string
+		mode ReviewMode
+	}{
+		{name: "commit mode", mode: ModeCommit},
+		{name: "range mode", mode: ModeRange},
+	}
+	for _, m := range modes {
+		t.Run(m.name, func(t *testing.T) {
+			p := NewFileRead(&FileReader{RepoDir: dir, Mode: m.mode, Ref: commit})
+			result, err := p.Execute(context.Background(), map[string]any{"file_path": ".env"})
+			if err != nil {
+				t.Fatalf("Execute(.env) error = %v, want a refusal result and no error", err)
+			}
+			assertSecretRefusal(t, result, ".env", secretMarker)
+		})
+	}
+}
+
+// TestExecute_RefusesSecretPathBehindSymlink covers the indirect request: the
+// name the model asks for is innocuous, and only the location it resolves to
+// is a credential file. The refusal has to come from the reader, which is the
+// only layer that knows where the name lands.
+func TestExecute_RefusesSecretPathBehindSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink privileges vary on Windows")
+	}
+
+	const secretMarker = "LINKED-SECRET-MUST-NOT-LEAK"
+	dir := t.TempDir()
+	writeTestFile(t, dir, ".env", "TOKEN="+secretMarker+"\n")
+	if err := os.Symlink(".env", filepath.Join(dir, "notes.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dir, ".env"), filepath.Join(dir, "absolute-notes.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewFileRead(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+	for _, filePath := range []string{"notes.md", "absolute-notes.md"} {
+		t.Run(filePath, func(t *testing.T) {
+			result, err := p.Execute(context.Background(), map[string]any{"file_path": filePath})
+			if err != nil {
+				t.Fatalf("Execute(%q) error = %v, want a refusal result and no error", filePath, err)
+			}
+			assertSecretRefusal(t, result, filePath, secretMarker)
+		})
+	}
+}
+
+// TestExecute_RefusesIgnoredCredentialPath covers the credentials a project
+// names itself: `secrets/prod.json` matches no built-in pattern, it is simply
+// listed in .gitignore and never tracked. The tool refuses it with no line of
+// its content, and still reads the tracked code beside it.
+func TestExecute_RefusesIgnoredCredentialPath(t *testing.T) {
+	const ignoredMarker = "PROJECT-OWN-CREDENTIAL-MUST-NOT-LEAK"
+	dir := setupTestRepo(t)
+	writeTestFile(t, dir, ".gitignore", "secrets/\nlocal-credentials.yaml\n")
+	commitWorktree(t, dir, "add gitignore")
+
+	if err := os.Mkdir(filepath.Join(dir, "secrets"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, dir, filepath.Join("secrets", "prod.json"), "{\"token\": \""+ignoredMarker+"\"}\n")
+	writeTestFile(t, dir, "local-credentials.yaml", "password: "+ignoredMarker+"\n")
+
+	p := NewFileRead(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+
+	for _, filePath := range []string{"secrets/prod.json", "local-credentials.yaml"} {
+		t.Run("refuses "+filePath, func(t *testing.T) {
+			result, err := p.Execute(context.Background(), map[string]any{"file_path": filePath})
+			if err != nil {
+				t.Fatalf("Execute(%q) error = %v, want a refusal result and no error", filePath, err)
+			}
+			if !strings.HasPrefix(result, "Error: file_path") || !strings.Contains(result, "ignored by this repository") {
+				t.Fatalf("Execute(%q) = %q, want the ignored-path refusal", filePath, result)
+			}
+			if strings.Contains(result, ignoredMarker) {
+				t.Fatalf("Execute(%q) leaked ignored content: %q", filePath, result)
+			}
+		})
+	}
+
+	t.Run("reads tracked code", func(t *testing.T) {
+		result, err := p.Execute(context.Background(), map[string]any{"file_path": "hello.go"})
+		if err != nil {
+			t.Fatalf("Execute(hello.go) error = %v", err)
+		}
+		if !strings.Contains(result, "package main") {
+			t.Fatalf("Execute(hello.go) = %q, want the file content", result)
+		}
+	})
+}
+
+// TestExecute_ReadsSecretLookalikePaths guards the other direction: the
+// denylist must not start swallowing the template and public-key files a
+// reviewer legitimately needs, which is what an over-broad normalization of
+// the path would do.
+func TestExecute_ReadsSecretLookalikePaths(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, ".env.example", "TOKEN=replace-me\n")
+	writeTestFile(t, dir, "id_rsa.pub", "ssh-ed25519 AAAA public\n")
+	writeTestFile(t, dir, "prod.env", "REGION=eu-west-1\n")
+
+	p := NewFileRead(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+	for filePath, want := range map[string]string{
+		".env.example": "TOKEN=replace-me",
+		"id_rsa.pub":   "ssh-ed25519 AAAA public",
+		"prod.env":     "REGION=eu-west-1",
+	} {
+		t.Run(filePath, func(t *testing.T) {
+			result, err := p.Execute(context.Background(), map[string]any{"file_path": filePath})
+			if err != nil {
+				t.Fatalf("Execute(%q) error = %v", filePath, err)
+			}
+			if !strings.Contains(result, want) {
+				t.Fatalf("Execute(%q) = %q, want content containing %q", filePath, result, want)
+			}
+		})
+	}
+}
+
 func TestExecute_WithEndLine(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "c.txt", "a\nb\nc\nd\ne\n")

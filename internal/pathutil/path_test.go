@@ -199,3 +199,41 @@ func TestWithinBase_AdditionalCases(t *testing.T) {
 		})
 	}
 }
+
+// TestRelWithinBase pins the contract rooted file access depends on: a name
+// that stays inside the base comes back in base-relative form, and a name that
+// leaves it comes back rejected with no name at all, so a caller cannot open
+// something it was told was outside.
+func TestRelWithinBase(t *testing.T) {
+	cases := []struct {
+		name    string
+		base    string
+		target  string
+		wantRel string
+		wantOK  bool
+	}{
+		{name: "base itself", base: "/a/b", target: "/a/b", wantRel: ".", wantOK: true},
+		{name: "child", base: "/a/b", target: "/a/b/c", wantRel: "c", wantOK: true},
+		{name: "deep child", base: "/a/b", target: "/a/b/c/d/e", wantRel: "c/d/e", wantOK: true},
+		{name: "dot segment is cleaned away", base: "/a/b", target: "/a/b/./c", wantRel: "c", wantOK: true},
+		{name: "inner traversal resolves inside", base: "/a/b", target: "/a/b/c/../d", wantRel: "d", wantOK: true},
+		{name: "parent is rejected", base: "/a/b", target: "/a", wantRel: "", wantOK: false},
+		{name: "escaping traversal is rejected", base: "/a/b", target: "/a/b/../x", wantRel: "", wantOK: false},
+		{name: "sibling sharing a prefix is rejected", base: "/a/b", target: "/a/b-other/c", wantRel: "", wantOK: false},
+		// filepath.Rel cannot relate a relative base to an absolute target.
+		{name: "unrelatable pair is rejected", base: "relative", target: "/absolute", wantRel: "", wantOK: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			base := filepath.FromSlash(tc.base)
+			target := filepath.FromSlash(tc.target)
+			wantRel := filepath.FromSlash(tc.wantRel)
+
+			gotRel, gotOK := RelWithinBase(base, target)
+			if gotOK != tc.wantOK || gotRel != wantRel {
+				t.Fatalf("RelWithinBase(%q, %q) = (%q, %v), want (%q, %v)",
+					base, target, gotRel, gotOK, wantRel, tc.wantOK)
+			}
+		})
+	}
+}
