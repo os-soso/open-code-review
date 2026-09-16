@@ -340,41 +340,6 @@ When there are no matches, the tool returns the literal string
 - Searches the **current working tree** in workspace mode, or the
   resolved target ref in range / commit mode (the `FileReader.Ref` is
   passed as a positional argument to `git grep`).
-- Each result line keeps at most **1024 bytes**; a longer line is cut at
-  that boundary and marked with `...[truncated]`. Output is read from
-  `git grep` under both a row ceiling and a byte ceiling, so a broad
-  search cannot grow the provider's memory with the size of the
-  repository.
-- `search_text` is limited to **1000 characters**. With
-  `use_perl_regexp: true`, a pattern is rejected instead of run when
-  repeating a group could match the same text in more than one way —
-  because its body carries a quantifier of its own, as in `(a+)+`, or
-  because its branches are not distinct literals, as in `(a|aa)+` or
-  `(\w|\d)+` — since that is what makes backtracking exponential;
-  rewrite it with a character class. Alternation between distinct
-  literals, such as `(cat|dog)+`, matches in linear time and is accepted.
-  Perl-regexp searches also run under a shorter deadline (5s) than
-  literal ones (10s).
-- Matches in credential files (`.env`, `.ssh/**`, `id_rsa`, `.netrc`,
-  `.npmrc` and the rest of the built-in secret-path denylist) are
-  withheld, and the output says so with `Note: Matches in credential
-  files were withheld by the secret-path policy.`. A withheld match is
-  dropped as it is read and does not count against the 100-line cap, so a
-  credential file cannot spend the budget of the files after it.
-- Only **regular files** are reported: a symlink or other non-regular
-  path is withheld, and `git grep` does not read through one either. A
-  hard link in the worktree is an ordinary file to git, so bytes it
-  shares with an inode outside the repository are searchable — review an
-  untrusted checkout in an isolated copy.
-- A failed search is reported by one of a fixed set of messages — `the
-  directory is not a git repository`, `git rejected the search pattern`
-  and the like — so nothing `git grep` wrote is repeated back. Its
-  diagnostics name the absolute path of the checkout and echo the
-  pattern the model sent, and neither reaches the model, the session
-  record or the terminal. The two failures that still carry text out —
-  git could not be started, or its output could not be read — are
-  flattened to a single line, stripped of control characters, shortened,
-  and have absolute paths replaced with `<path>`.
 
 ## Tool execution & errors
 

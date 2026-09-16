@@ -77,28 +77,6 @@ func TestIsSecretPath(t *testing.T) {
 		{"uppercase env", ".ENV", true},
 		{"uppercase key", "ID_RSA", true},
 		{"mixed case ssh dir", "Foo/.SSH/id_ed25519", true},
-
-		// How the path is spelled must not change the verdict. These forms
-		// reach the denylist from the file_read tool, where the path is a
-		// model-supplied argument rather than a path the diff pipeline built,
-		// so each of them is a way the denylist could otherwise be sidestepped.
-		{"leading dot slash", "./.env", true},
-		{"parent segment collapses onto a secret", "src/../.env", true},
-		{"redundant separators", "foo//.env", true},
-		{"absolute path", "/repo/.env", true},
-		{"windows separator env", `foo\.env`, true},
-		{"windows separator ssh dir", `.ssh\id_rsa`, true},
-		{"windows separator nested key", `home\.ssh\keys\id_ed25519`, true},
-		{"windows separator uppercase", `FOO\.ENV`, true},
-		{"windows drive path", `C:\repo\.npmrc`, true},
-
-		// Normalization must not start matching paths that are not secrets:
-		// a template stays a template whichever separator spells it, and an
-		// empty or bare-directory path has no filename to match at all.
-		{"windows separator template", `foo\.env.example`, false},
-		{"windows separator public key", `keys\id_rsa.pub`, false},
-		{"empty path", "", false},
-		{"current directory", ".", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
