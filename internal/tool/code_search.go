@@ -76,7 +76,10 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 	}
 
 	cmdArgs = append(cmdArgs, "-n", "--no-color")
-	cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", gitGrepMaxCount))
+	// Ask for one row more than the cap per file: --max-count is a PER-FILE
+	// limit, so gitGrep enforces the total itself and uses the extra row to
+	// tell a genuinely truncated result from exactly gitGrepMaxCount matches.
+	cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", gitGrepMaxCount+1))
 
 	cmdArgs = append(cmdArgs, "-e", searchText)
 
@@ -175,7 +178,12 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	}
 
 	lines := strings.Split(strings.TrimRight(outStr, "\n"), "\n")
-	truncated := len(lines) >= gitGrepMaxCount
+	// --max-count above is per file, so the total is bounded here: anything
+	// beyond gitGrepMaxCount rows is dropped and flagged in the note below.
+	truncated := len(lines) > gitGrepMaxCount
+	if truncated {
+		lines = lines[:gitGrepMaxCount]
+	}
 
 	type match struct {
 		lineNum int
