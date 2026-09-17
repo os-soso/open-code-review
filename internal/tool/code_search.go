@@ -230,6 +230,13 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	var fileOrder []string
 	seen := make(map[string]bool)
 
+	// Rows git prints that carry no parsable line number: a binary-file
+	// notice ("Binary file blob.bin matches") has none at all, and a path
+	// containing ':' shifts the colon-separated fields so the number lands in
+	// the wrong one. Neither can be formatted as a "<lineNum>|<content>" row,
+	// so the loop below keeps them aside instead of discarding them outright.
+	var unformattable []string
+
 	hasRef := p.FileReader.Ref != ""
 	splitN := 3
 	offset := 0
@@ -249,12 +256,14 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		}
 		parts := strings.SplitN(line, ":", splitN)
 		if len(parts) < splitN {
+			unformattable = append(unformattable, line)
 			continue
 		}
 		fname := parts[offset]
 		m := match{}
 		ln, parseErr := strconv.Atoi(parts[offset+1])
 		if parseErr != nil {
+			unformattable = append(unformattable, line)
 			continue
 		}
 		m.lineNum = ln
@@ -275,8 +284,33 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		sb.WriteString("\n")
 	}
 
+	// A search whose every row was unformattable used to answer with an empty
+	// string, saying nothing about a search git did answer. Pass git's own
+	// output through verbatim instead: it still names the file, and for a
+	// colon-bearing path the line number and content as well. Rows that
+	// arrived alongside formattable ones are left out, so a normal search
+	// still returns only the documented "<lineNum>|<content>" shape. The
+	// pass-through obeys the same total cap, lines having been sliced to
+	// gitGrepMaxCount above.
+	if len(fileOrder) == 0 && len(unformattable) > 0 {
+		sb.WriteString("Note: git reported these matches in a form this tool cannot format " +
+			"(a binary-file notice, or a path containing ':'). They are shown exactly as git printed them:\n")
+		for _, line := range unformattable {
+			sb.WriteString(line + "\n")
+		}
+		sb.WriteString("\n")
+	}
+
 	if err != nil && errStr != "" {
 		sb.WriteString(fmt.Sprintf("Warning: %s\n", strings.TrimSpace(errStr)))
+	}
+
+	if sb.Len() == 0 {
+		// git exited without an error and without a single result line, so
+		// there is nothing to format and nothing to pass on. Say that in the
+		// same words the exit-1 path above uses, rather than handing back an
+		// empty string the model cannot interpret.
+		return "No matches found", nil
 	}
 
 	return sb.String(), nil

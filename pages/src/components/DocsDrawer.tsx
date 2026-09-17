@@ -33,6 +33,27 @@ export const DOCS_TOOLBAR_HEIGHT = 52;
 /** The two panels the docs shell can turn into an off-canvas drawer. */
 export type DocsDrawerPanelId = 'sidebar' | 'toc';
 
+/* Attribute pairing a sub-toolbar toggle with the panel it opens. Written out
+ * literally on the button (JSX accepts a data-* attribute only as a literal)
+ * and read back through findDocsDrawerToggle, so the two must stay in step. */
+const DOCS_DRAWER_TOGGLE_ATTR = 'data-docs-drawer-toggle';
+
+/**
+ * The sub-toolbar toggle that opens `panel`, or null when no toolbar is showing
+ * — on desktop, where both rails are mounted, or for a document with no
+ * headings to list.
+ *
+ * Exposed for focus recovery. A control inside a dismissed panel stays in the
+ * DOM but cannot take focus (see {@link docsDrawerPanelStyle}), so a surface
+ * handing focus back to such a control needs the on-screen stand-in: the toggle
+ * that brings its panel back. `aria-controls` already names the panel's DOM id,
+ * but the panel id is this module's own vocabulary and a caller asking for "the
+ * toggle for this panel" should not have to know the markup it points at.
+ */
+export function findDocsDrawerToggle(panel: DocsDrawerPanelId): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`[${DOCS_DRAWER_TOGGLE_ATTR}="${panel}"]`);
+}
+
 /** Imperative surface returned by {@link useDocsDrawer}. */
 export interface DocsDrawerController {
   /** The panel currently open, or null when every panel is closed. */
@@ -239,6 +260,9 @@ const DocsDrawerToggleButton: React.FC<{
       onBlur={() => setFocused(false)}
       aria-expanded={open}
       aria-controls={spec.controls}
+      /* Names the panel for findDocsDrawerToggle above; keep in step with
+       * DOCS_DRAWER_TOGGLE_ATTR. */
+      data-docs-drawer-toggle={spec.panel}
       style={{
         display: 'flex',
         alignItems: 'center',

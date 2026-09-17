@@ -48,13 +48,29 @@
    of the viewport parks it under the 72px fixed navbar, so reserve the navbar's
    height plus clearance: the same 90px offset DocsPage's scrollToHeading applies
    by hand, which keeps native fragment navigation, scrollIntoView and the TOC
-   landing on the identical position. */
+   landing on the identical position.
+
+   The alias spans belong in the same rule, and not as a cosmetic nicety: a
+   heading whose ID was renamed — or whose localized slug was displaced by an
+   explicit `{#id}` marker — keeps its previously published fragments alive
+   through the empty `span.docs-heading-alias` elements MarkdownRenderer emits
+   inside it, so a legacy or localized fragment (the percent-encoded Chinese or
+   Cyrillic slug of a Limits heading, say) resolves to the span, not to the
+   heading. Both the browser's native fragment handling and DocsPage's hash
+   handler (getElementById(...).scrollIntoView({block:'start'})) honour the
+   scroll margin of the element they were handed, and an inline span has no
+   scroll margin of its own, so without this selector every aliased fragment
+   lands the heading — and the first line of the text under it — behind the fixed
+   navbar. Only the scroll margin is set here: the spans must stay empty,
+   non-focusable and layout-neutral, so no display, sizing or spacing property
+   may be added, which would move the heading text beside them. */
 .docs-markdown h1,
 .docs-markdown h2,
 .docs-markdown h3,
 .docs-markdown h4,
 .docs-markdown h5,
-.docs-markdown h6 {
+.docs-markdown h6,
+.docs-markdown .docs-heading-alias {
   /* DocsPage publishes --docs-heading-offset from the live chrome height, so
      the margin grows with the sub-toolbar that sits under the navbar below
      1024px; 90px is the desktop value and the fallback outside DocsPage. */
@@ -98,6 +114,26 @@
   overflow-wrap: break-word;
 }
 
+/* A chip is painted per line box, not per element (the default
+   `box-decoration-break: slice`), so a chip that breaks across two lines paints
+   two bordered pills and reads as two separate code references. A command such
+   as `git grep --max-count` breaks at the hyphens as readily as at the space, so
+   it splits at 768px and below even though it is short. MarkdownRenderer's
+   codespan renderer therefore adds this class to short inline code in body
+   text — 24 monospace columns or fewer of the codespan's own text, counting a
+   wide CJK or fullwidth code point as two — which cannot fragment while held on
+   one line and, at the 13px body size, is narrow enough that refusing to wrap it
+   cannot overflow the article column.
+   It is deliberately a gate and not a blanket rule, on two counts. A long span
+   such as the 70-character truncation note in the code_search Limits bullet must
+   keep the `overflow-wrap: break-word` above, since nowrap would push that one
+   past the column edge on a phone. And heading code is left out altogether:
+   `docs-heading-code` renders it at the heading's own size (28px in an h1), where
+   the 24-column budget no longer describes any column the site lays out. */
+.docs-markdown code.code-nowrap {
+  white-space: nowrap;
+}
+
 /* Code blocks */
 .docs-markdown pre {
   background: #000000;
@@ -126,28 +162,56 @@
    the translucent background keeps it legible over long lines. It is a real
    <button>, so the user-agent button styling is reset here.
 
-   Target size: the control's own box is 32x32, comfortably clearing the 24x24
-   floor of WCAG 2.5.8. The painted chip stays 24x24 because a single-line code
-   block is only 30px tall, so a 32px chip would spill outside the <pre>: the
-   4px padding plus `background-clip: content-box` paint the background over the
-   content box only, and `border-radius: 8px` leaves the usual 4px radius there
-   (an inner corner radius is the outer radius minus the padding). With top:0 /
-   right:4px the chip and its 16x16 icon land on exactly the pixels they did as
-   a 24x24 div at top:4px / right:8px. */
+   Target size: the control's own box is 44x44, the WCAG 2.5.5 (Target Size,
+   AAA) size and the size the language button, the GitHub link and the sidebar
+   rows already use, so every icon control on the site is hit the same way. The
+   painted chip stays 24x24 because a single-line code block is only 30px tall
+   (4px of `pre` padding above and below a 22px line), so a 44px chip would
+   swallow the block: the 10px padding plus `background-clip: content-box` paint
+   the background over the content box alone, 44 - 2*10 = 24 wide and tall, and
+   `border-radius: 14px` leaves the usual 4px radius there (an inner corner
+   radius is the outer radius minus the padding, 14 - 10 = 4).
+
+   The offsets are the padding read backwards, so the chip and its 16x16 icon
+   land on exactly the pixels they did as a 32x32 control at top:0 / right:4px
+   (and as a 24x24 div at top:4px / right:8px before that): the content box top
+   sits 10px inside the border box, so top:-6px puts it at -6 + 10 = 4px below
+   the `pre` padding edge, and right:-2px puts its right edge at -2 + 10 = 8px
+   inside that edge. Nothing about the article's appearance changes; only the
+   transparent padding is new, and it overhangs a single-line block by 6px above,
+   2px right and 44 - 6 - 30 = 8px below. All three land in dead space: a
+   paragraph above the block carries a 12px bottom margin, the `pre` itself a
+   16px bottom margin, and 2px is well inside the 20px (mobile) / 48px (desktop)
+   padding of the docs <main>, so the wider hit area neither reflows the column
+   nor adds page scroll. The one place with no slack to spare is a block opening
+   a list item that follows another: `li` has exactly 6px of bottom margin, so
+   the overhang reaches the previous item's boundary and no further. That it
+   cannot take a click there anyway is the point of the pointer-events rule
+   below, which keeps the box out of hit-testing until it is actually revealed.
+
+   The scroll margin is what keeps that transparent padding from costing the
+   keyboard anything. A browser scrolls a focused control into view only while
+   part of its box is outside the viewport, so the 6px of padding above the
+   block is 6px of scroll positions in which the box counts as visible while the
+   painted chip and its focus ring sit behind the 72px fixed navbar. Reserving
+   the same offset the headings use (published by DocsPage from the live chrome
+   height) puts a Tab-focused copy button clear of that band, which is what WCAG
+   2.4.11 asks of a focus indicator. It affects nothing but focus scrolling. */
 .docs-markdown pre .code-copy-btn {
   position: absolute;
-  top: 0;
-  right: 4px;
+  top: -6px;
+  right: -2px;
+  scroll-margin-top: var(--docs-heading-offset, 90px);
   box-sizing: border-box;
-  width: 32px;
-  height: 32px;
-  min-width: 32px;
-  min-height: 32px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
   margin: 0;
-  padding: 4px;
+  padding: 10px;
   border: none;
   font: inherit;
   color: inherit;
@@ -155,13 +219,22 @@
   appearance: none;
   background: rgba(0, 0, 0, 0.7);
   background-clip: content-box;
-  border-radius: 8px;
+  border-radius: 14px;
   opacity: 0;
+  /* Hit-testing follows visibility. The box lies over the code's top-right
+     corner (and 6px above the block) whether or not the chip is painted, so
+     left alive it would swallow a click or a drag-select aimed at the code
+     underneath — over a wider area than the 32x32 control did. Every state that
+     reveals the chip restores pointer events below, so the target is live
+     exactly when the reader can see what they are aiming at; keyboard
+     activation is unaffected, since pointer-events governs hit-testing only. */
+  pointer-events: none;
   transition: opacity 0.15s ease, background-color 0.15s ease;
 }
 
 .docs-markdown pre:hover .code-copy-btn {
   opacity: 1;
+  pointer-events: auto;
 }
 
 /* A focused control must be visible even when the <pre> is not hovered,
@@ -170,14 +243,18 @@
 .docs-markdown pre .code-copy-btn:focus,
 .docs-markdown pre .code-copy-btn:focus-visible {
   opacity: 1;
+  pointer-events: auto;
 }
 
 /* The ring itself is keyboard-only, so a mouse click does not leave one behind
-   on the chip. The negative outline offset keeps it on the painted 24x24 box,
-   so it never reaches outside the code block. */
+   on the chip. The outline offset is the negated padding, -10px against the
+   44x44 border box, which draws the ring on the edge of the painted 24x24 chip:
+   an untouched (or smaller) offset would float the ring out in the transparent
+   padding, away from the only thing the reader can see and partly outside the
+   code block. */
 .docs-markdown pre .code-copy-btn:focus-visible {
   outline: 2px solid rgba(255, 255, 255, 0.85);
-  outline-offset: -4px;
+  outline-offset: -10px;
 }
 
 /* Pressed state, so an activation is visibly acknowledged under pointer,
@@ -195,10 +272,12 @@
   border-radius: 0;
 }
 
-/* Touch devices have no hover: keep the button always visible. */
+/* Touch devices have no hover: keep the button always visible — and tappable,
+   since there is no hover state to hand it pointer events back. */
 @media (hover: none) {
   .docs-markdown pre .code-copy-btn {
     opacity: 1;
+    pointer-events: auto;
   }
 }
 
@@ -238,9 +317,13 @@
    table confines that overflow to the column — the treatment `pre code` above
    already gives long code lines — while the table itself stays a table, so it
    keeps filling the column and keeps its native semantics (giving the table its
-   own `display: block` would strip those from the accessibility tree). The
-   wrapper is focusable so the columns beyond the fold can be reached with the
-   keyboard alone, not just by dragging the scrollbar. */
+   own `display: block` would strip those from the accessibility tree).
+   MarkdownRenderer measures each wrapper after layout and makes it a labelled,
+   focusable region only where it actually scrolls, so the columns beyond the
+   fold can be reached with the keyboard alone rather than only by dragging the
+   scrollbar, and a table that fits its column plants no focus stop at all. The
+   ring on a focused wrapper is the site-wide `:focus-visible` outline; nothing
+   here overrides it. */
 .docs-markdown .table-scroll {
   max-width: 100%;
   overflow-x: auto;

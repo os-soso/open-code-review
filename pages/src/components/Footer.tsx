@@ -16,10 +16,6 @@ const LANG_OPTIONS: { value: Language; label: string }[] = [
   { value: 'ru', label: 'Русский' }, // allow-non-english: language options are labelled in their own language
 ];
 
-// Focus ring colour, applied inline: the footer is styled with inline style
-// objects only, so no :focus-visible rule can reach these controls.
-const FOCUS_RING = '2px solid #2BDE5E';
-
 // Marks the selected language with a shape as well as a colour, so the current
 // choice is not conveyed by colour alone.
 const CheckIcon: React.FC = () => (
@@ -84,9 +80,12 @@ const Footer: React.FC = () => {
   const { language, setLanguage, t } = useTranslation();
   const { isMobile } = useResponsive();
   const [open, setOpen] = useState(false);
-  // Hover and keyboard-focus feedback is held in state because every style
-  // here is an inline style object: there is no stylesheet for this component
-  // to carry :hover / :focus-visible rules.
+  // Hover and roving-keyboard feedback is held in state for the border, label
+  // colour and highlight a selector cannot express: whether this control's
+  // popup is open, and which option the arrow keys sit on. The focus ring is
+  // not among them — it is authored in styles/index.css against
+  // :focus-visible, because an inline `outline` would be the only ring these
+  // controls could ever show and would vanish with the handler that set it.
   const [hoveredLang, setHoveredLang] = useState<Language | null>(null);
   const [focusedLang, setFocusedLang] = useState<Language | null>(null);
   const [triggerHover, setTriggerHover] = useState(false);
@@ -181,12 +180,13 @@ const Footer: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               gap: 6,
-              // No inline background: the resting, hover and pressed fills are
-              // the .footer-lang-btn rules in index.css, which an inline value
+              // No inline background and no inline outline: the resting, hover
+              // and pressed fills and the :focus-visible ring are the
+              // .footer-lang-btn rules in index.css, which an inline value
               // would shadow.
               // Hover, keyboard focus and the open state all brighten the
               // border and the label, which is the only interactive feedback
-              // this control can carry inline.
+              // this control carries inline.
               minHeight: 44,
               border: open || triggerHover || triggerFocus
                 ? '1px solid rgba(255,255,255,0.45)'
@@ -196,8 +196,6 @@ const Footer: React.FC = () => {
               color: open || triggerHover || triggerFocus ? '#FFFFFF' : 'rgba(255,255,255,0.6)',
               fontSize: 13,
               cursor: 'pointer',
-              outline: triggerFocus ? FOCUS_RING : 'none',
-              outlineOffset: 2,
               transition: 'border-color 0.2s, color 0.2s, background 0.15s',
             }}
           >
@@ -259,10 +257,11 @@ const Footer: React.FC = () => {
                       width: '100%',
                       minHeight: 44,
                       padding: '8px 12px',
-                      // Hover, pressed and selected fills are the .lang-menu-item
-                      // rules in index.css (keyed on data-active); only the
-                      // roving keyboard highlight, which no CSS state expresses,
-                      // is painted inline — and only while it applies, so the
+                      // Hover, pressed and selected fills and the focus ring are
+                      // the .lang-menu-item rules in index.css (keyed on
+                      // data-active and :focus-visible); only the roving
+                      // keyboard highlight, which no CSS state expresses, is
+                      // painted inline — and only while it applies, so the
                       // stylesheet is never shadowed at rest.
                       background: focusedLang === opt.value ? 'rgba(255,255,255,0.16)' : undefined,
                       border: 'none',
@@ -273,8 +272,6 @@ const Footer: React.FC = () => {
                       textAlign: 'left',
                       whiteSpace: 'nowrap',
                       cursor: 'pointer',
-                      outline: focusedLang === opt.value ? FOCUS_RING : 'none',
-                      outlineOffset: -2,
                       transition: 'background 0.2s, color 0.2s',
                     }}
                   >

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import Navbar from '../components/Navbar';
@@ -10,7 +10,7 @@ import LandingPage from '../components/LandingPage';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import NotFoundPage from './NotFoundPage';
 import { SearchTrigger } from '../components/SearchTrigger';
-import { DOCS_TOOLBAR_HEIGHT, DocsDrawerBackdrop, DocsDrawerBar, DocsDrawerToggleSpec, docsDrawerPanelStyle, useDocsDrawer } from '../components/DocsDrawer';
+import { DOCS_TOOLBAR_HEIGHT, DocsDrawerBackdrop, DocsDrawerBar, DocsDrawerPanelId, DocsDrawerToggleSpec, docsDrawerPanelStyle, findDocsDrawerToggle, useDocsDrawer } from '../components/DocsDrawer';
 import { useResponsive } from '../hooks/useResponsive';
 import { useCommandSearch, useSearchKeyboardNav } from '../hooks/useCommandSearch';
 import { getDocContent, getDocTitle, DocSlug, searchDocs } from '../content/docs';
@@ -233,6 +233,103 @@ const TOC_ENTRY_MARGIN = 24;
  * scrollbar, or a programmatic scroll from elsewhere on the page. */
 const TOC_PIN_SETTLE_MS = 150;
 
+/* ─── Locale re-anchoring ───
+ * Changing the UI language swaps the whole article for its translation, which
+ * is a different length — the same document measures 9008px in English, 8474px
+ * in Chinese and 9341px in Japanese. Nothing moves the reader's scroll offset
+ * across that swap, so carrying it over verbatim leaves them wherever the new
+ * text happens to reach: measured 298px past the section they were reading on
+ * one switch and 310px short of it on the next, in both cases inside a
+ * different section. What the reader is actually holding on to is the section,
+ * not the offset, so the section is what is preserved: the heading they are in
+ * and their distance from it are recorded before the swap and the offset that
+ * reproduces that distance is applied once the translation has rendered. */
+interface LocaleScrollAnchor {
+  /** Document the anchor was measured in; a navigation invalidates it. */
+  slug: DocSlug;
+  /** Id of the heading the reader is in, "" for a heading with no slug. */
+  id: string;
+  /** Its position among the rendered headings, -1 for the page title. Backs up
+   *  the id for a document whose headings are slugged from translated text. */
+  index: number;
+  /** window.scrollY minus the heading's offset within the document — the
+   *  reader's distance from the heading, which the new offset must reproduce. */
+  offset: number;
+}
+
+/* How long a locale re-anchor keeps correcting the scroll offset. A translated
+ * article's height goes on moving after its first paint — code blocks gain copy
+ * buttons, diagrams render, images decode — so one correction at commit time
+ * can be stale a frame later. Same budget as the route-level scroll restore in
+ * App.tsx, and it ends early the moment anything else scrolls the window. */
+const LOCALE_REANCHOR_TIMEOUT_MS = 1500;
+
+/**
+ * Puts the reader back on `anchor`'s section now that the translated article
+ * has rendered, and keeps the offset corrected while the page settles.
+ *
+ * Applied repeatedly rather than once because the article's height is still
+ * moving: the first correction is computed before the swap has finished laying
+ * out — measured 122px short on one switch — and only a later frame can see
+ * where the heading finally came to rest. It stops as soon as the scroll offset
+ * is not the one it last set, which then means exactly one thing: the reader has
+ * scrolled, or something else on the page has. Returns the canceller for the
+ * next locale change and for unmount.
+ */
+function reanchorToSection(anchor: LocaleScrollAnchor): () => void {
+  const deadline = Date.now() + LOCALE_REANCHOR_TIMEOUT_MS;
+  /* Chrome and Firefox re-anchor the scroll offset themselves when content
+   * above the viewport changes size, which is precisely what the translated
+   * article does for a few frames after the swap. Their compensation is
+   * indistinguishable from a reader scroll to the guard below — and lands short
+   * of the mark, leaving the heading 23px past the activation line and the TOC
+   * highlighting the previous section — so it is held off for as long as this
+   * loop owns the offset, and the author's own value is put back afterwards.
+   * Engines without scroll anchoring ignore the property and need nothing. */
+  const scroller = document.documentElement;
+  const previousOverflowAnchor = scroller.style.overflowAnchor;
+  scroller.style.overflowAnchor = 'none';
+  let frame = 0;
+  let finished = false;
+  /* -1 until the first correction: before then there is nothing to compare the
+   * current offset against, and the reader cannot have moved off it yet. */
+  let lastApplied = -1;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    cancelAnimationFrame(frame);
+    scroller.style.overflowAnchor = previousOverflowAnchor;
+  };
+  const correct = () => {
+    if (finished) return;
+    if (lastApplied >= 0 && window.scrollY !== lastApplied) {
+      finish();
+      return;
+    }
+    /* The heading may not be in the DOM yet on the first frame of a swap that
+     * renders asynchronously; retrying until the deadline covers that too. */
+    const el = resolveHeadingElement(anchor.id, anchor.index);
+    if (el) {
+      const documentTop = el.getBoundingClientRect().top + window.scrollY;
+      const maxScroll = Math.max(0, scroller.scrollHeight - window.innerHeight);
+      const target = Math.min(Math.max(0, documentTop + anchor.offset), maxScroll);
+      /* Sub-pixel differences are what the browser itself rounds to, so acting
+       * on them would mean scrolling on every single frame. */
+      if (Math.abs(window.scrollY - target) > 1) {
+        window.scrollTo({ top: target, behavior: 'auto' });
+      }
+      lastApplied = window.scrollY;
+    }
+    if (Date.now() >= deadline) {
+      finish();
+      return;
+    }
+    frame = requestAnimationFrame(correct);
+  };
+  correct();
+  return finish;
+}
+
 /** Rendered markdown headings, in document order — the TOC's 1:1 counterpart. */
 function headingElements(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>('.docs-markdown h2, .docs-markdown h3'));
@@ -293,6 +390,44 @@ const SEARCH_FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
 
+/* ─── Rail landmark ids ───
+ * Each rail is named by the sub-toolbar toggle that opens it (aria-controls) as
+ * well as by the rail itself, and the focus recovery below asks which rail a
+ * control lives in — three call sites for the same two ids. */
+const SIDEBAR_NAV_ID = 'docs-sidebar-nav';
+const TOC_NAV_ID = 'docs-toc-nav';
+
+/** The rail an element sits inside, or null when it sits outside both. */
+function drawerPanelOf(el: HTMLElement): DocsDrawerPanelId | null {
+  if (el.closest(`#${SIDEBAR_NAV_ID}`)) return 'sidebar';
+  if (el.closest(`#${TOC_NAV_ID}`)) return 'toc';
+  return null;
+}
+
+/**
+ * Moves focus to the first candidate that accepts it, and reports whether any
+ * did.
+ *
+ * Being in the document is not the same as being able to take focus: a rail
+ * dismissed as a drawer keeps its whole subtree mounted — so the docs tree and
+ * the TOC are never missing — but paints it `visibility: hidden`, and focus()
+ * on anything inside it is a silent no-op that leaves the reader on <body>.
+ * Each candidate is therefore verified against document.activeElement rather
+ * than judged in advance, which keeps the test independent of *why* a candidate
+ * refused focus: hidden, disabled, inert, or detached between recording and
+ * restoring. preventScroll keeps the restore from moving the page: the palette
+ * was an overlay and the article behind it never moved, so the reader must find
+ * it exactly where they left it.
+ */
+function focusFirstAvailable(candidates: (HTMLElement | null)[]): boolean {
+  for (const candidate of candidates) {
+    if (!candidate || !candidate.isConnected || typeof candidate.focus !== 'function') continue;
+    candidate.focus({ preventScroll: true });
+    if (document.activeElement === candidate) return true;
+  }
+  return false;
+}
+
 /* Product name every document title ends with. Kept here rather than imported
  * from App so the lazily loaded docs chunk does not depend on the app shell. */
 const SITE_TITLE = 'Open Code Review';
@@ -332,7 +467,10 @@ const DocsPage: React.FC = () => {
   const tocRef = useRef<HTMLElement | null>(null);
   /* Cancels an in-flight click-triggered scroll when a newer one starts */
   const cancelPendingScroll = useRef<(() => void) | null>(null);
-  const { t, language } = useTranslation();
+  /* Section the reader is in, measured just before a locale swap and consumed
+   * by the re-anchoring effect below. Null whenever no swap is pending. */
+  const localeAnchorRef = useRef<LocaleScrollAnchor | null>(null);
+  const { t, language, onBeforeLanguageChange } = useTranslation();
   const { isMobile, isTablet, isDesktop } = useResponsive();
   const {
     searchOpen, setSearchOpen,
@@ -372,10 +510,10 @@ const DocsPage: React.FC = () => {
   const drawerToggles = useMemo<DocsDrawerToggleSpec[]>(() => {
     const toggles: DocsDrawerToggleSpec[] = [];
     if (sidebarIsDrawer) {
-      toggles.push({ panel: 'sidebar', label: t('docs.nav.menuLabel'), controls: 'docs-sidebar-nav' });
+      toggles.push({ panel: 'sidebar', label: t('docs.nav.menuLabel'), controls: SIDEBAR_NAV_ID });
     }
     if (tocIsDrawer && headings.length > 0) {
-      toggles.push({ panel: 'toc', label: t('docs.toc'), controls: 'docs-toc-nav' });
+      toggles.push({ panel: 'toc', label: t('docs.toc'), controls: TOC_NAV_ID });
     }
     return toggles;
   }, [sidebarIsDrawer, tocIsDrawer, headings.length, t]);
@@ -430,6 +568,62 @@ const DocsPage: React.FC = () => {
     if (!fragment) return;
     return scrollToFragmentWhenReady(decodeFragment(fragment));
   }, [hash, docContent]);
+
+  /* Record which section the reader is in, ready for a locale swap.
+   * The section is the last heading whose top has crossed the activation line —
+   * the same rule the scroll-spy resolves the active TOC entry with, so the
+   * section preserved here is the one the TOC says the reader is in — and the
+   * page title while they are still above the first heading. */
+  const captureLocaleAnchor = useCallback(() => {
+    const rendered = headingElements();
+    let index = -1;
+    for (let i = 0; i < rendered.length; i += 1) {
+      /* Headings are in document order, so the first one still below the line
+       * ends the search. */
+      if (rendered[i].getBoundingClientRect().top > tocActivationLine) break;
+      index = i;
+    }
+    const el = index >= 0 ? rendered[index] : document.getElementById(DOC_TITLE_ID);
+    /* No article on screen to anchor to — a redirecting or not-found render. */
+    if (!el) {
+      localeAnchorRef.current = null;
+      return;
+    }
+    const documentTop = el.getBoundingClientRect().top + window.scrollY;
+    localeAnchorRef.current = {
+      slug: activeSlug,
+      id: el.id,
+      index,
+      offset: window.scrollY - documentTop,
+    };
+  }, [activeSlug, tocActivationLine]);
+
+  /* The language controls live in the navbar and the footer, so the swap is
+   * announced through the i18n provider rather than handled at the control. */
+  useEffect(
+    () => onBeforeLanguageChange(captureLocaleAnchor),
+    [onBeforeLanguageChange, captureLocaleAnchor]
+  );
+
+  /* Put the reader back on that section once the translated article is in the
+   * DOM. A layout effect, so the correction is applied in the same frame as the
+   * swap and the reader never sees the unreconciled position; MarkdownRenderer
+   * parses during render, so the translated headings are already measurable
+   * here. The anchor is consumed either way: it describes a layout that no
+   * longer exists, so it must not survive to a later swap. */
+  useLayoutEffect(() => {
+    const anchor = localeAnchorRef.current;
+    localeAnchorRef.current = null;
+    if (!anchor) return;
+    /* A navigation has overtaken the swap: the reader is on a different
+     * document, whose landing belongs to the route-change scroll manager. */
+    if (anchor.slug !== activeSlug) return;
+    /* A fragment in the URL owns the landing — the effect above re-runs on the
+     * swap and scrolls the translated heading into view itself — and two
+     * scrolls competing for the same frame would be visible as a jump. */
+    if (hash) return;
+    return reanchorToSection(anchor);
+  }, [language, activeSlug, hash]);
 
   /* A heading position from the previous document means nothing in the new
    * document's TOC, so drop the active entry (and any pending activation) as
@@ -768,11 +962,27 @@ const DocsPage: React.FC = () => {
     }
     const opener = searchOpenerRef.current;
     searchOpenerRef.current = null;
-    /* The opener can have unmounted while the palette was open (selecting a
-     * result re-renders the sidebar), and a detached node cannot take focus. */
-    if (opener && opener.isConnected && typeof opener.focus === 'function') {
-      opener.focus();
-    }
+    if (!opener) return;
+    /* The opener may no longer be able to take focus. It can have unmounted
+     * while the palette was open (selecting a result re-renders the sidebar),
+     * and below 1024px it can still be mounted yet hidden: the docs tree's own
+     * search trigger lives inside a rail drawer, and opening the palette
+     * dismisses that drawer, which leaves the trigger at `visibility: hidden`.
+     * focus() on it then does nothing at all, and since the palette's input is
+     * unmounting in this same commit the reader is left on <body> with no way
+     * back into the page but Tab from the very top.
+     * So focus is handed to the first control that will actually take it: the
+     * opener, then the sub-toolbar toggle that re-opens the rail it lives in —
+     * on screen, and one press from the trigger itself — then whichever search
+     * trigger is on screen, and finally the article, which is always focusable
+     * and is where the palette's own results would have taken the reader. */
+    const panel = drawerPanelOf(opener);
+    focusFirstAvailable([
+      opener,
+      panel ? findDocsDrawerToggle(panel) : null,
+      document.querySelector<HTMLElement>('.search-trigger'),
+      contentRef.current,
+    ]);
   }, [searchOpen]);
 
   /* Active option's id, for the input's aria-activedescendant. Undefined when
@@ -906,7 +1116,7 @@ const DocsPage: React.FC = () => {
             reachable on a phone. The two modes get separate style objects
             because a sticky rail and a fixed panel share no geometry. */}
         <nav
-          id="docs-sidebar-nav"
+          id={SIDEBAR_NAV_ID}
           aria-label={t('docs.nav.ariaLabel')}
           aria-hidden={sidebarIsDrawer && openPanel !== 'sidebar' ? true : undefined}
           tabIndex={sidebarIsDrawer ? -1 : undefined}
@@ -1116,7 +1326,7 @@ const DocsPage: React.FC = () => {
             <nav>, leaving the entry links untouched. */}
         {headings.length > 0 && (
           <nav
-            id="docs-toc-nav"
+            id={TOC_NAV_ID}
             className="docs-toc"
             aria-label={t('docs.toc.ariaLabel')}
             aria-hidden={tocIsDrawer && openPanel !== 'toc' ? true : undefined}

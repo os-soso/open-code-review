@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -620,6 +621,116 @@ func TestGitGrep_CapsTotalResultsAcrossFiles(t *testing.T) {
 			hasNote := strings.HasPrefix(result, "Note: The results have been truncated.")
 			if hasNote != tt.wantNote {
 				t.Errorf("truncation note present = %v, want %v; output:\n%s", hasNote, tt.wantNote, result)
+			}
+		})
+	}
+}
+
+// TestGitGrep_UnformattableRowsAreReportedVerbatim pins what becomes of rows
+// git prints that carry no parsable line number: a binary-file notice has none
+// at all, and a path containing ':' shifts the colon-separated fields so the
+// number lands in the wrong one. Neither can be formatted as a
+// "<lineNum>|<content>" row, so a search whose every row is of that shape
+// passes git's own output through instead of answering with an empty string.
+// A search that did produce formattable rows keeps the grouped
+// "File:"/"Match lines:" shape and says nothing extra.
+func TestGitGrep_UnformattableRowsAreReportedVerbatim(t *testing.T) {
+	const passThroughNote = "Note: git reported these matches in a form this tool cannot format"
+
+	tests := []struct {
+		name           string
+		fileName       string
+		content        []byte
+		commitMode     bool
+		wantSubstrings []string
+		wantNote       bool
+		wantRows       int
+	}{
+		{
+			name:           "a binary-only match is answered with git's binary-file notice",
+			fileName:       "blob.bin",
+			content:        []byte("needle line\n\x00\x01\x02binary payload\n"),
+			wantSubstrings: []string{"Binary file blob.bin matches"},
+			wantNote:       true,
+			wantRows:       0,
+		},
+		{
+			name:           "a colon-bearing path is answered as git printed it",
+			fileName:       "wei:rd.txt",
+			content:        []byte("needle line\nneedle line\n"),
+			wantSubstrings: []string{"wei:rd.txt:1:needle line", "wei:rd.txt:2:needle line"},
+			wantNote:       true,
+			wantRows:       0,
+		},
+		{
+			name:           "a colon-bearing path is answered in commit mode too",
+			fileName:       "wei:rd.txt",
+			content:        []byte("needle line\nneedle line\n"),
+			commitMode:     true,
+			wantSubstrings: []string{"wei:rd.txt:1:needle line", "wei:rd.txt:2:needle line"},
+			wantNote:       true,
+			wantRows:       0,
+		},
+		{
+			name:           "a formattable match keeps the grouped result shape",
+			fileName:       "needle.txt",
+			content:        []byte("needle line\nneedle line\n"),
+			wantSubstrings: []string{"File: needle.txt", "Match lines: 2", "1|needle line", "2|needle line"},
+			wantNote:       false,
+			wantRows:       2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if strings.Contains(tt.fileName, ":") && runtime.GOOS == "windows" {
+				// Windows reserves ':' for drive letters and alternate data
+				// streams, so a path containing one cannot exist there and git
+				// can never print this row shape on that platform.
+				t.Skip("a path containing ':' cannot exist on Windows")
+			}
+
+			dir := setupTestRepo(t)
+			if err := os.WriteFile(filepath.Join(dir, tt.fileName), tt.content, 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			ref := ""
+			mode := ModeWorkspace
+			if tt.commitMode {
+				// Commit mode searches a ref, so the fixture has to be in it;
+				// git then prefixes every row with "<ref>:", which is the
+				// four-part row shape.
+				for _, args := range [][]string{{"add", "-A"}, {"commit", "-m", "fixture"}} {
+					cmd := exec.Command("git", args...)
+					cmd.Dir = dir
+					if out, cmdErr := cmd.CombinedOutput(); cmdErr != nil {
+						t.Fatalf("git %v: %v\n%s", args, cmdErr, out)
+					}
+				}
+				ref = getHeadCommit(t, dir)
+				mode = ModeCommit
+			}
+
+			p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: ref, Mode: mode})
+			result, err := p.gitGrep(context.Background(), "needle", true, false, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if result == "" {
+				t.Fatal("result is empty: a search git answered must not come back as an empty string")
+			}
+			for _, want := range tt.wantSubstrings {
+				if !strings.Contains(result, want) {
+					t.Errorf("result is missing %q; output:\n%s", want, result)
+				}
+			}
+			if hasNote := strings.Contains(result, passThroughNote); hasNote != tt.wantNote {
+				t.Errorf("pass-through note present = %v, want %v; output:\n%s", hasNote, tt.wantNote, result)
+			}
+			if got := countMatchLines(t, result); got != tt.wantRows {
+				t.Errorf("emitted %d formatted match lines, want %d", got, tt.wantRows)
 			}
 		})
 	}

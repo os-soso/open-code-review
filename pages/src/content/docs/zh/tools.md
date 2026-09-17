@@ -328,7 +328,7 @@ Match lines: 1
 
 两种扩展方式：
 
-### 1. 禁用工具 {#1-disable-a-tool}
+### 1. 禁用工具 {#disable-a-tool}
 
 复制 `tools.json`，删掉不想要的条目，然后运行：
 
@@ -339,7 +339,7 @@ ocr review --tools ./my-tools.json
 例如，想要一个从不读额外上下文的“仅评论”评审器，只保留 `code_comment` 和
 `task_done`。
 
-### 2. 重新描述工具 {#2-re-describe-a-tool}
+### 2. 重新描述工具 {#re-describe-a-tool}
 
 保留 `name`（provider 内部按 name 查找）但更改 `description` 以引导模型。这是
 注入项目专属指引最简单的方式——如“使用 `file_read` 时，始终读取变更附近至少

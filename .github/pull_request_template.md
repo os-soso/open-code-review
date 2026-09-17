@@ -11,6 +11,20 @@
 - [ ] Documentation update
 - [ ] CI / Build / Tooling
 
+## Change Scope
+
+<!-- Extent, not intent: what a reviewer finds in `git diff --stat <base>`. State the
+     headline change, then one line per additional area this PR touches and why it is
+     there. An area left off this list reads as undisclosed. -->
+
+- Headline change:
+- Also touched (one line each, with the reason):
+
+- [ ] The list above matches the actual diff — no part of this PR is undisclosed.
+- [ ] The scope matches what this PR's issue, plan or task declared. If it grew beyond that,
+      the extra areas are listed above and the decision is named — scope amended and disclosed
+      here, or the unrelated work split into its own PR.
+
 ## How Has This Been Tested?
 
 <!-- Describe the tests you ran to verify your changes. -->
@@ -29,7 +43,10 @@
 - [ ] I have signed the CLA
 - [ ] I did not use AI/LLM to create this PR, or I disclosed the tool/model below and reviewed its output; I did not attribute commits to AI and will answer maintainer questions and review comments myself without AI/LLM.
 
-<!-- Please disclose the model used here if AI was used. -->
+<!-- Name the tools and models here if AI/LLM assistance was used, as AGENTS.md requires;
+     write "none" if it was not. A ticked box with nothing named is not a disclosure. -->
+
+AI/LLM tools and models used:
 
 ## Related Issues
 

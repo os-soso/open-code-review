@@ -367,7 +367,7 @@ disabling (via `--tools`) safe.
 
 Two paths to extend:
 
-### 1. Disable a tool
+### 1. Disable a tool {#disable-a-tool}
 
 Copy `tools.json`, drop the entry you don't want, then run:
 
@@ -378,7 +378,7 @@ ocr review --tools ./my-tools.json
 For example, if you want a "comment-only" reviewer that never reads
 extra context, keep only `code_comment` and `task_done`.
 
-### 2. Re-describe a tool
+### 2. Re-describe a tool {#re-describe-a-tool}
 
 Keep the `name` (the providers are looked up by name internally) but
 change the `description` to nudge the model. This is the easiest way to

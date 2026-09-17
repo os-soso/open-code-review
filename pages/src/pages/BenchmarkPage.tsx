@@ -10,7 +10,10 @@ const BenchmarkPage: React.FC = () => {
   return (
     <div style={{ paddingTop: 72 }}>
       <FadeInSection>
-        <BenchmarkSection />
+        {/* The benchmark section is this route's whole subject, so its title is
+            the page's h1. On the landing page the same section keeps its h2
+            below the hero's h1. */}
+        <BenchmarkSection headingLevel="h1" />
       </FadeInSection>
       <FadeInSection>
         <Footer />

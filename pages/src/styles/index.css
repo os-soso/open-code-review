@@ -424,6 +424,30 @@ a {
   background: rgba(255,255,255,0.12);
 }
 
+/* The keyboard ring for these controls is authored here, not inline. The
+   locale badge used to paint it from React state as `outline: <focused> ? ring
+   : 'none'`, which left an inline `outline: none` on it at rest: an inline
+   declaration beats every non-!important author rule (and the UA ring), so the
+   indicator existed only while that handler ran and would have disappeared
+   silently with it. Pinning the rule to the class repeats the global
+   declaration on purpose, exactly as `.search-trigger` above does, so the
+   control keeps its ring through any later narrowing of the global rule. */
+.nav-icon-btn:focus-visible {
+  outline: 2px solid #2BDE5E;
+  outline-offset: 2px;
+}
+
+/* Rows of the collapsed navigation menu (the tab list and, on phones, the
+   GitHub link). Their ring is drawn inside the row — the panel is padded and
+   scrolls on phones, where an outset ring would sit in that padding and could
+   be clipped — which is the inset offset these rows used to apply inline.
+   The row's hover/focus fill stays with the component: it tracks the roving
+   keyboard highlight, a state no CSS selector expresses. */
+.nav-menu-row:focus-visible {
+  outline: 2px solid #2BDE5E;
+  outline-offset: -2px;
+}
+
 /* Locale dropdown options, shared by the navbar and the footer switchers. */
 .lang-menu-item {
   background: transparent;
@@ -453,6 +477,13 @@ a {
   background: rgba(255,255,255,0.2);
 }
 
+/* Option ring, inset for the same reason as the menu rows above: the panel is
+   padded, so a ring drawn outside the option would overlap its edge. */
+.lang-menu-item:focus-visible {
+  outline: 2px solid #2BDE5E;
+  outline-offset: -2px;
+}
+
 /* Footer brand link: the label brightens rather than the row filling, which
    suits a link that sits on the page background rather than in a menu. */
 .footer-link-label {
@@ -479,4 +510,12 @@ a {
 
 .footer-lang-btn:active {
   background: rgba(255,255,255,0.12);
+}
+
+/* Ring pinned by name for the same reason as `.nav-icon-btn` above: this is
+   the other control that used to suppress its indicator with an inline
+   `outline: none` and paint it back from component state. */
+.footer-lang-btn:focus-visible {
+  outline: 2px solid #2BDE5E;
+  outline-offset: 2px;
 }

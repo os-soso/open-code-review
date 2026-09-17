@@ -301,9 +301,11 @@ Match lines: 1
 
 ### 制限 {#limits}
 
-- 出力は合計 **100 行**までに制限されます。`git grep --max-count` はファイルごとの制限なので、ツールは
-  ファイルごとに上限より 1 行多く git に要求し、全ファイルを通して先頭 100 行のみを保持します。結果が 100 行を超えた場合、出力の前に
-  `Note: The results have been truncated. Only showing first 100 results.` が付加されます。
+- 出力は合計 **100 行**までに制限されます。`git grep --max-count`
+  はファイルごとの制限なので、ツールはファイルごとに上限より 1 行多く git
+  に要求し、全ファイルを通して先頭 100 行のみを保持します。結果が 100 行を超えた場合、出力の前に
+  `Note: The results have been truncated. Only showing first 100 results.`
+  が付加されます。
 - git に渡せない `search_text` はプロセス内で拒否され、検索を実行せずにエラー文字列が返ります。空 / 空白のみの場合は、
   各行に展開されるのではなく `Error: search_text is blank`、NUL バイトを含む場合は
   `Error: search_text contains invalid characters`、**16 KiB** を超える場合は
@@ -329,7 +331,7 @@ Match lines: 1
 
 拡張方法は 2 つあります：
 
-### 1. ツールを無効化する {#1-disable-a-tool}
+### 1. ツールを無効化する {#disable-a-tool}
 
 `tools.json` をコピーし、不要なエントリを削除してから実行します：
 
@@ -340,7 +342,7 @@ ocr review --tools ./my-tools.json
 たとえば、追加のコンテキストを一切読み取らない「コメントのみ」のレビューアが欲しい場合は、`code_comment` と
 `task_done` のみを残します。
 
-### 2. ツールの説明を書き換える {#2-re-describe-a-tool}
+### 2. ツールの説明を書き換える {#re-describe-a-tool}
 
 `name` は保持し（provider は内部で name で検索します）、`description` を変更してモデルを誘導します。これは
 プロジェクト固有のガイダンスを注入する最も簡単な方法です——たとえば「`file_read` を使う際は、常に変更付近の少なくとも

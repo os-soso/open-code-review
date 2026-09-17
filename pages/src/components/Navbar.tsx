@@ -64,10 +64,6 @@ interface NavMenuLocationState {
   focusNavMenuTrigger?: boolean;
 }
 
-// Focus ring colour, applied inline: the navbar is styled with inline style
-// objects only, so no :focus-visible rule can reach these controls.
-const FOCUS_RING = '2px solid #2BDE5E';
-
 // Hamburger / close icon, drawn rather than typed: a glyph character would be
 // locale-dependent and would not survive the repository's English-only check.
 const MenuIcon: React.FC<{ expanded: boolean }> = ({ expanded }) => (
@@ -162,9 +158,12 @@ const Navbar: React.FC = () => {
   const navigate = useNavigate();
   const [langOpen, setLangOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  // Hover and keyboard-focus feedback is held in state because every style
-  // here is an inline style object: there is no stylesheet for this component
-  // to carry :hover / :focus-visible rules.
+  // Hover and roving-keyboard feedback is held in state for the fills and
+  // opacities a selector cannot express: which item the arrow keys currently
+  // sit on, and whether a popup this control owns is open. The focus ring
+  // itself is NOT among them — it is authored in styles/index.css against
+  // :focus-visible, because an inline `outline` would be the only ring these
+  // controls could ever show and would vanish with the handler that set it.
   const [hoveredLang, setHoveredLang] = useState<Language | null>(null);
   const [focusedLang, setFocusedLang] = useState<Language | null>(null);
   const [langTriggerFocus, setLangTriggerFocus] = useState(false);
@@ -280,7 +279,9 @@ const Navbar: React.FC = () => {
   };
 
   // A collapsed-menu row: transparent by default, lifted while hovered or
-  // focused, and tinted plus emboldened when it is the current page.
+  // focused, and tinted plus emboldened when it is the current page. Rows
+  // carry the `nav-menu-row` class, which is where their inset focus ring is
+  // authored; only the roving highlight is painted from state here.
   const menuRowStyle = (key: string, active: boolean): React.CSSProperties => {
     const highlighted = hoveredMenuKey === key || focusedMenuKey === key;
     return {
@@ -303,8 +304,6 @@ const Navbar: React.FC = () => {
       whiteSpace: 'nowrap' as const,
       textDecoration: 'none',
       cursor: 'pointer',
-      outline: focusedMenuKey === key ? FOCUS_RING : 'none',
-      outlineOffset: -2,
       transition: 'background 0.2s, opacity 0.2s',
     };
   };
@@ -431,6 +430,10 @@ const Navbar: React.FC = () => {
                 onMouseLeave={() => setMenuTriggerHover(false)}
                 onFocus={() => setMenuTriggerFocus(true)}
                 onBlur={() => setMenuTriggerFocus(false)}
+                // No class and no inline outline: the keyboard ring comes from
+                // the site-wide `:focus-visible` rule in styles/index.css,
+                // whose 2px offset is the one this trigger needs. Only the
+                // open/hover/focus fill is state-driven and inline.
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -446,8 +449,6 @@ const Navbar: React.FC = () => {
                   cursor: 'pointer',
                   flexShrink: 0,
                   boxSizing: 'border-box' as const,
-                  outline: menuTriggerFocus ? FOCUS_RING : 'none',
-                  outlineOffset: 2,
                   transition: 'background 0.2s',
                 }}
               >
@@ -505,6 +506,7 @@ const Navbar: React.FC = () => {
                       <button
                         key={tab.path}
                         type="button"
+                        className="nav-menu-row"
                         role="menuitem"
                         ref={el => { menuItemRefs.current[index] = el; }}
                         aria-current={isActive ? 'page' : undefined}
@@ -523,6 +525,7 @@ const Navbar: React.FC = () => {
                         style={{ height: 1, background: 'rgba(255,255,255,0.12)', margin: '4px 6px' }}
                       />
                       <a
+                        className="nav-menu-row"
                         role="menuitem"
                         ref={el => { menuItemRefs.current[navTabs.length] = el; }}
                         href={GITHUB_URL}
@@ -541,6 +544,11 @@ const Navbar: React.FC = () => {
                         ref={el => { menuItemRefs.current[navTabs.length + 1] = el; }}
                         onClick={() => goTo('/quickstart')}
                         {...menuRowHandlers(MENU_KEY_CTA)}
+                        // Like the inline `.nav-cta` pill, this call to action
+                        // takes its keyboard ring from the site-wide
+                        // `:focus-visible` rule in styles/index.css at the same
+                        // 2px offset it used to declare inline; the rows above
+                        // need `nav-menu-row` only because their ring is inset.
                         style={{
                           width: '100%',
                           height: 40,
@@ -558,8 +566,6 @@ const Navbar: React.FC = () => {
                           whiteSpace: 'nowrap',
                           cursor: 'pointer',
                           opacity: hoveredMenuKey === MENU_KEY_CTA ? 0.88 : 1,
-                          outline: focusedMenuKey === MENU_KEY_CTA ? FOCUS_RING : 'none',
-                          outlineOffset: 2,
                         }}
                       >
                         {t('navbar.getStarted')}
@@ -595,14 +601,15 @@ const Navbar: React.FC = () => {
                 justifyContent: 'center',
                 border: 'none',
                 cursor: 'pointer',
-                // The resting dim and the hover fill are the .nav-icon-btn
-                // rules in index.css; the badge is only forced to full strength
-                // inline while the menu is open or the trigger holds keyboard
-                // focus, states the stylesheet cannot see, so the class rules
-                // are never shadowed at rest.
+                // The resting dim, the hover fill and the keyboard focus ring
+                // are the .nav-icon-btn rules in index.css; the badge is only
+                // forced to full strength inline while the menu is open or the
+                // trigger holds keyboard focus, states the stylesheet cannot
+                // see, so the class rules are never shadowed at rest. No
+                // inline `outline` belongs here: it would shadow the authored
+                // :focus-visible ring and leave the indicator dependent on
+                // these handlers.
                 opacity: langOpen || langTriggerFocus ? 1 : undefined,
-                outline: langTriggerFocus ? FOCUS_RING : 'none',
-                outlineOffset: 2,
                 padding: 0,
                 width: 44,
                 height: 44,
@@ -684,11 +691,12 @@ const Navbar: React.FC = () => {
                         width: '100%',
                         minHeight: 44,
                         padding: '8px 12px',
-                        // Hover, pressed and selected fills are the .lang-menu-item
-                        // rules in index.css (keyed on data-active); only the
-                        // roving keyboard highlight, which no CSS state
-                        // expresses, is painted inline — and only while it
-                        // applies, so the stylesheet is never shadowed at rest.
+                        // Hover, pressed and selected fills and the focus ring
+                        // are the .lang-menu-item rules in index.css (keyed on
+                        // data-active and :focus-visible); only the roving
+                        // keyboard highlight, which no CSS state expresses, is
+                        // painted inline — and only while it applies, so the
+                        // stylesheet is never shadowed at rest.
                         background: focusedLang === opt.value ? 'rgba(255,255,255,0.16)' : undefined,
                         border: 'none',
                         borderRadius: 6,
@@ -698,8 +706,6 @@ const Navbar: React.FC = () => {
                         textAlign: 'left' as const,
                         whiteSpace: 'nowrap' as const,
                         cursor: 'pointer',
-                        outline: focusedLang === opt.value ? FOCUS_RING : 'none',
-                        outlineOffset: -2,
                         transition: 'background 0.2s, color 0.2s',
                       }}
                     >

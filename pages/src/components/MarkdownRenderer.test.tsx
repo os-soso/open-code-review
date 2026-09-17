@@ -120,11 +120,13 @@ describe('MarkdownRenderer inline markup in headings', () => {
 
     const headingCode = container.querySelector('h2 code');
     expect(headingCode?.getAttribute('style')?.replace(/\s/g, '')).toBe('font-size:inherit');
+    // Heading code carries the heading class alone: the nowrap budget is a
+    // body-text measurement and does not describe a chip rendered at 20px.
     expect(headingCode?.className).toBe('docs-heading-code');
     // Body code keeps the stylesheet's own sizing.
     const bodyCode = container.querySelector('p code');
     expect(bodyCode?.getAttribute('style')).toBeNull();
-    expect(bodyCode?.className).toBe('');
+    expect(bodyCode?.className).toBe('code-nowrap');
   });
 
   it('renders emphasis and links inside a heading as elements', () => {
@@ -205,6 +207,342 @@ describe('MarkdownRenderer language of parts', () => {
     const { container } = renderMarkdown(CODE_CONTENT, 'en');
 
     expect(container.querySelector('p code')?.getAttribute('lang')).toBeNull();
+  });
+});
+
+describe('MarkdownRenderer inline code wrapping', () => {
+  // The bordered chip is repainted per line box, so a reference that fits the
+  // prose column must not break; one that cannot fit still has to wrap, or it
+  // would push the article sideways.
+  const TRUNCATION_NOTE = 'Note: The results have been truncated. Only showing first 100 results.';
+  // Exactly at the budget and exactly one column past it.
+  const AT_BUDGET = 'x'.repeat(24);
+  const OVER_BUDGET = 'x'.repeat(25);
+  // Inline code from the localized docs: a CJK glyph is two monospace columns
+  // wide, so 22 characters are 33 columns and stay wrappable, while a short
+  // placeholder is well inside the budget.
+  const ZH_LONG_CODE = '<会话 ID>-<任务类型>-<作用域哈希>'; // allow-non-english: inline code copied from the zh configuration doc
+  const ZH_SHORT_CODE = '会话 ID'; // allow-non-english: inline code copied from the zh configuration doc
+
+  /** Class names of every inline code span the markdown produced, in order. */
+  function inlineCodeClasses(markdown: string, language?: string): string[] {
+    const { container } = renderMarkdown(markdown, language);
+    return Array.from(container.querySelectorAll('p code')).map((code) => code.className);
+  }
+
+  it('holds a short inline code reference on one line and lets a long one wrap', () => {
+    expect(inlineCodeClasses(`Bullet with \`git grep --max-count\` and \`${TRUNCATION_NOTE}\`.`)).toEqual([
+      'code-nowrap',
+      '',
+    ]);
+  });
+
+  it('treats the column budget as inclusive at its boundary', () => {
+    expect(inlineCodeClasses(`\`${AT_BUDGET}\` then \`${OVER_BUDGET}\`.`)).toEqual(['code-nowrap', '']);
+  });
+
+  it('counts a wide CJK glyph as the two monospace columns it renders as', () => {
+    expect(inlineCodeClasses(`\`${ZH_LONG_CODE}\` and \`${ZH_SHORT_CODE}\`.`)).toEqual(['', 'code-nowrap']);
+  });
+
+  it('counts the decoded text, so an escaped character is one column', () => {
+    // 18 characters as authored; 35 in the HTML marked emits, because `&`, `<`
+    // and `"` become entities. Counting the markup would push it over budget.
+    expect(inlineCodeClasses('Redirect with `a & b < c "quoted"` here.')).toEqual(['code-nowrap']);
+  });
+
+  it('keeps the gate off heading code, which renders at the heading font size', () => {
+    const { container } = renderMarkdown(
+      '## `code_search`\n\n## `The results have been truncated`\n\nBody with `code_search` inline.',
+      'ru',
+    );
+
+    const [short, long] = Array.from(container.querySelectorAll('h2 code'));
+    // `font-size: inherit` renders this chip at the h2's 20px (28px in an h1),
+    // where 24 columns is no longer the ~202px the budget was measured for, so a
+    // nowrap chip could reach past a narrow column instead of wrapping in it.
+    expect(short.className).toBe('docs-heading-code');
+    expect(short.getAttribute('lang')).toBe('en');
+    expect(short.getAttribute('style')?.replace(/\s/g, '')).toBe('font-size:inherit');
+    expect(long.className).toBe('docs-heading-code');
+    expect(long.getAttribute('style')?.replace(/\s/g, '')).toBe('font-size:inherit');
+    // The very same text in body prose is inside the budget and is held.
+    expect(container.querySelector('p code')?.className).toBe('code-nowrap');
+  });
+
+  it('leaves fenced code blocks out of the inline treatment', () => {
+    const { container } = renderMarkdown('```sh\ngit grep\n```');
+
+    expect(container.querySelector('pre code')?.className).toBe('language-sh');
+  });
+});
+
+describe('MarkdownRenderer table scroll regions', () => {
+  // A paragraph sits between the heading and the table on purpose: marked's
+  // output is flat, so the heading that names the region is several previous
+  // siblings back rather than the immediate one.
+  const TABLE_CONTENT = [
+    '## Tool availability',
+    '',
+    'Intro paragraph.',
+    '',
+    '| Tool | Phase |',
+    '| --- | --- |',
+    '| code_search | main |',
+  ].join('\n');
+  // The same table with no heading anywhere above it.
+  const HEADLESS_TABLE_CONTENT = ['| Tool | Phase |', '| --- | --- |', '| code_search | main |'].join('\n');
+
+  /**
+   * jsdom reports 0 for both measurements, so overflow has to be stated: an own
+   * property on the instance shadows the prototype getter the component reads.
+   */
+  function setMeasuredWidths(element: HTMLElement, scrollWidth: number, clientWidth: number) {
+    Object.defineProperty(element, 'scrollWidth', { value: scrollWidth, configurable: true });
+    Object.defineProperty(element, 'clientWidth', { value: clientWidth, configurable: true });
+  }
+
+  /** The four attributes the measurement owns, as the DOM currently holds them. */
+  function regionAttributes(wrapper: HTMLElement) {
+    return {
+      tabindex: wrapper.getAttribute('tabindex'),
+      role: wrapper.getAttribute('role'),
+      labelledby: wrapper.getAttribute('aria-labelledby'),
+      label: wrapper.getAttribute('aria-label'),
+    };
+  }
+
+  const resizeWindow = () => fireEvent(window, new Event('resize'));
+
+  it('leaves a wrapper that does not scroll out of the tab order entirely', () => {
+    const { container } = renderMarkdown(TABLE_CONTENT);
+
+    const wrapper = container.querySelector<HTMLElement>('.table-scroll');
+    expect(wrapper).not.toBeNull();
+    expect(wrapper?.querySelector('table')).not.toBeNull();
+    expect(regionAttributes(wrapper as HTMLElement)).toEqual({
+      tabindex: null,
+      role: null,
+      labelledby: null,
+      label: null,
+    });
+    expect(container.querySelectorAll('[tabindex]').length).toBe(0);
+  });
+
+  it('emits the wrapper inert, so the markup itself plants no focus stop', () => {
+    // The measurement below would strip a tabindex baked into the markup, which
+    // hides it from the DOM assertions above. What it cannot hide is the removal
+    // itself: taking an attribute off an element records a mutation with the old
+    // value, while removing one that was never there records nothing.
+    const records: MutationRecord[] = [];
+    const observer = new MutationObserver((entries) => records.push(...entries));
+    observer.observe(document.body, {
+      subtree: true,
+      attributes: true,
+      attributeOldValue: true,
+      attributeFilter: ['tabindex', 'role', 'aria-labelledby', 'aria-label'],
+    });
+
+    try {
+      const { container } = renderMarkdown(TABLE_CONTENT);
+      records.push(...observer.takeRecords());
+
+      expect(container.querySelector('.table-scroll')).not.toBeNull();
+      expect(records.map((record) => [(record.target as HTMLElement).className, record.attributeName])).toEqual([]);
+    } finally {
+      observer.disconnect();
+    }
+  });
+
+  it('makes an overflowing wrapper a named region and a Tab stop', () => {
+    const { container } = renderMarkdown(TABLE_CONTENT);
+
+    const wrapper = container.querySelector<HTMLElement>('.table-scroll') as HTMLElement;
+    setMeasuredWidths(wrapper, 600, 300);
+    resizeWindow();
+
+    expect(regionAttributes(wrapper)).toEqual({
+      tabindex: '0',
+      role: 'region',
+      labelledby: 'tool-availability',
+      label: null,
+    });
+    // The label has to resolve to the section title the reader just passed.
+    expect(document.getElementById('tool-availability')?.textContent).toBe('Tool availability');
+  });
+
+  it('chains the enclosing section heading into the name, so sibling tables differ', () => {
+    // The shape of a tool reference: the same subsection title under two tools.
+    // Named after the nearest heading alone, both tables would be "Schema".
+    const content = [
+      '## code_search',
+      '',
+      '### Schema',
+      '',
+      '| Field | Type |',
+      '| --- | --- |',
+      '| pattern | string |',
+      '',
+      '## file_find',
+      '',
+      '### Schema',
+      '',
+      '| Field | Type |',
+      '| --- | --- |',
+      '| glob | string |',
+    ].join('\n');
+    const { container } = renderMarkdown(content);
+
+    const wrappers = Array.from(container.querySelectorAll<HTMLElement>('.table-scroll'));
+    wrappers.forEach((wrapper) => setMeasuredWidths(wrapper, 600, 300));
+    resizeWindow();
+
+    const [toolOne, toolTwo] = Array.from(container.querySelectorAll('h2'));
+    const [schemaOne, schemaTwo] = Array.from(container.querySelectorAll('h3'));
+    expect(wrappers.map((wrapper) => wrapper.getAttribute('aria-labelledby'))).toEqual([
+      `${toolOne.id} ${schemaOne.id}`,
+      `${toolTwo.id} ${schemaTwo.id}`,
+    ]);
+    // Both IDs must resolve, or the name would be empty and the region unnamed.
+    expect(wrappers[0].getAttribute('aria-labelledby')?.split(' ').map((id) => document.getElementById(id)?.textContent)).toEqual([
+      'code_search',
+      'Schema',
+    ]);
+  });
+
+  it('releases every attribute once the wrapper stops overflowing', () => {
+    const { container } = renderMarkdown(TABLE_CONTENT);
+
+    const wrapper = container.querySelector<HTMLElement>('.table-scroll') as HTMLElement;
+    setMeasuredWidths(wrapper, 600, 300);
+    resizeWindow();
+    expect(wrapper.getAttribute('tabindex')).toBe('0');
+
+    setMeasuredWidths(wrapper, 300, 300);
+    resizeWindow();
+
+    expect(regionAttributes(wrapper)).toEqual({
+      tabindex: null,
+      role: null,
+      labelledby: null,
+      label: null,
+    });
+  });
+
+  it('treats a one-pixel difference as a table that fits', () => {
+    const { container } = renderMarkdown(TABLE_CONTENT);
+
+    const wrapper = container.querySelector<HTMLElement>('.table-scroll') as HTMLElement;
+    setMeasuredWidths(wrapper, 301, 300);
+    resizeWindow();
+
+    expect(wrapper.getAttribute('tabindex')).toBeNull();
+  });
+
+  it('never drops the tabindex of the wrapper that holds focus', () => {
+    const { container } = renderMarkdown(TABLE_CONTENT);
+
+    const wrapper = container.querySelector<HTMLElement>('.table-scroll') as HTMLElement;
+    setMeasuredWidths(wrapper, 600, 300);
+    resizeWindow();
+    wrapper.focus();
+    expect(document.activeElement).toBe(wrapper);
+
+    // A resize that removed the tabindex here would drop the reader to <body>.
+    setMeasuredWidths(wrapper, 300, 300);
+    resizeWindow();
+    expect(wrapper.getAttribute('tabindex')).toBe('0');
+    expect(document.activeElement).toBe(wrapper);
+
+    // Focus traffic elsewhere in the article is not this wrapper's business:
+    // bound to the whole container the listener would re-measure every wrapper
+    // on each Tab press across a page of code blocks.
+    fireEvent.focusOut(container.querySelector('h2') as HTMLElement);
+    expect(wrapper.getAttribute('tabindex')).toBe('0');
+
+    // The wrapper's own focusout is when releasing it costs nothing.
+    wrapper.blur();
+    fireEvent.focusOut(wrapper);
+    expect(regionAttributes(wrapper)).toEqual({
+      tabindex: null,
+      role: null,
+      labelledby: null,
+      label: null,
+    });
+  });
+
+  it('names the region from the table caption when no heading precedes it', () => {
+    const { container } = renderMarkdown(HEADLESS_TABLE_CONTENT);
+
+    const wrapper = container.querySelector<HTMLElement>('.table-scroll') as HTMLElement;
+    const caption = document.createElement('caption');
+    caption.textContent = 'Tool availability per phase';
+    wrapper.querySelector('table')?.prepend(caption);
+    setMeasuredWidths(wrapper, 600, 300);
+    resizeWindow();
+
+    expect(regionAttributes(wrapper)).toEqual({
+      tabindex: '0',
+      role: 'region',
+      labelledby: null,
+      label: 'Tool availability per phase',
+    });
+  });
+
+  it('keeps an unnameable overflowing wrapper focusable but gives it no role', () => {
+    const { container } = renderMarkdown(HEADLESS_TABLE_CONTENT);
+
+    const wrapper = container.querySelector<HTMLElement>('.table-scroll') as HTMLElement;
+    setMeasuredWidths(wrapper, 600, 300);
+    resizeWindow();
+
+    // An unnamed role="region" is not exposed as a landmark at all, so the
+    // columns stay reachable and nothing false is announced.
+    expect(regionAttributes(wrapper)).toEqual({
+      tabindex: '0',
+      role: null,
+      labelledby: null,
+      label: null,
+    });
+  });
+
+  it('re-measures through a ResizeObserver where the environment has one', () => {
+    const observed: Element[] = [];
+    let notify = () => {};
+    let disconnected = false;
+
+    class TestResizeObserver {
+      constructor(callback: () => void) {
+        notify = callback;
+      }
+      observe(target: Element) {
+        observed.push(target);
+      }
+      unobserve() {
+        // Never called: the effect tears the whole observer down at once.
+      }
+      disconnect() {
+        disconnected = true;
+      }
+    }
+
+    vi.stubGlobal('ResizeObserver', TestResizeObserver);
+    try {
+      const { container, unmount } = renderMarkdown(TABLE_CONTENT);
+
+      const wrapper = container.querySelector<HTMLElement>('.table-scroll') as HTMLElement;
+      // Both the container and the table it holds change width on their own.
+      expect(observed).toEqual([wrapper, wrapper.querySelector('table')]);
+
+      setMeasuredWidths(wrapper, 600, 300);
+      notify();
+      expect(wrapper.getAttribute('tabindex')).toBe('0');
+
+      unmount();
+      expect(disconnected).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

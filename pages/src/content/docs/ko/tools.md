@@ -344,7 +344,7 @@ Match lines: 1
 
 확장하는 방법은 두 가지입니다.
 
-### 1. 도구 끄기 {#1-disable-a-tool}
+### 1. 도구 끄기 {#disable-a-tool}
 
 `tools.json`을 복사해 원하지 않는 항목을 지운 뒤 실행합니다:
 
@@ -355,7 +355,7 @@ ocr review --tools ./my-tools.json
 예를 들어 추가 맥락을 전혀 읽지 않는 "코멘트 전용" 리뷰어를 원한다면
 `code_comment`와 `task_done`만 남기세요.
 
-### 2. 도구 설명 바꾸기 {#2-re-describe-a-tool}
+### 2. 도구 설명 바꾸기 {#re-describe-a-tool}
 
 `name`은 그대로 두고(내부적으로 이름으로 제공자를 찾습니다) `description`만 고쳐
 모델을 유도합니다. 프로젝트 고유의 지침을 넣는 가장 쉬운 방법입니다. 예를 들면

@@ -134,6 +134,152 @@ function rewriteDocHref(href: string): string {
  */
 const TOAST_MESSAGE_LINGER_MS = 250;
 
+/**
+ * Widest inline code, in monospace columns, that is kept on a single line.
+ *
+ * `.docs-markdown code` paints a bordered chip, and the default
+ * `box-decoration-break: slice` repaints that border and padding on every line
+ * box a wrapped span produces — so a short reference such as
+ * `git grep --max-count` reads as two separate chips once the line breaks
+ * inside it (it breaks at the hyphen, not only at the spaces, because the rule
+ * carries `overflow-wrap: break-word`). Suppressing the wrap is only safe while
+ * the chip is narrower than the prose column, otherwise an unbreakable span
+ * would push the article sideways, which is why this is a threshold and not a
+ * blanket `white-space: nowrap`.
+ *
+ * 24 is derived from the site's own metrics, measured in the built page: the
+ * chip is 13px Menlo at 7.83px per ASCII column plus 6px padding each side and
+ * a 1px border, so 24 columns occupy ~202px, and the narrowest prose column the
+ * site lays out — a list item at a 375px viewport — is 311px wide. Anything
+ * longer keeps wrapping, which is what the 70-character truncation note in the
+ * same bullet must continue to do.
+ *
+ * That arithmetic is tied to the 13px body size, which is why the gate excludes
+ * heading code: `docs-heading-code` carries `font-size: inherit`, so the same
+ * span renders at 28px in an h1 and 20px in an h2, where 24 columns would be
+ * ~430px and ~300px and an unbreakable chip could reach past the column instead
+ * of wrapping inside it. Heading code needs no gate of its own — the longest in
+ * the documentation today is 14 columns in an h1 and 15 in an h2 (~249px and
+ * ~192px as rendered), so heading chips fit the narrow column and do not split.
+ */
+const INLINE_CODE_NOWRAP_MAX_COLUMNS = 24;
+
+/**
+ * Code points that occupy two monospace columns instead of one: an
+ * approximation of the East Asian Wide and Fullwidth classes of UAX #11,
+ * covering Hangul, the Kana, the CJK ideograph and radical blocks, CJK
+ * punctuation and the fullwidth ASCII forms.
+ *
+ * The documentation is published in five locales, and a localized page can put
+ * CJK text inside inline code (a placeholder such as a session id or a task
+ * type is written in the page's own language). Those glyphs measure 13.0px
+ * against an ASCII column's 7.83px, so counting characters alone would let a
+ * span nearly twice as wide as the budget through and reintroduce the
+ * horizontal overflow this threshold exists to avoid.
+ */
+const WIDE_CODE_POINT_PATTERN =
+  /[\u1100-\u115F\u2E80-\uA4CF\uA960-\uA97F\uAC00-\uD7A3\uF900-\uFAFF\uFE10-\uFE19\uFE30-\uFE6F\uFF00-\uFF60\uFFE0-\uFFE6]|[\u{20000}-\u{3FFFD}]/u;
+
+/**
+ * Width of an inline code span in monospace columns.
+ *
+ * Iterated with `for…of` so a surrogate pair counts as the one glyph it
+ * renders as, and measured on the codespan token's `text`, which marked hands
+ * over decoded — the HTML escaping to `&amp;`/`&lt;` happens in the renderer
+ * afterwards, so no entity can inflate the count.
+ */
+function measureCodeColumns(text: string): number {
+  let columns = 0;
+  for (const character of text) {
+    columns += WIDE_CODE_POINT_PATTERN.test(character) ? 2 : 1;
+  }
+  return columns;
+}
+
+/**
+ * The attributes the overflow measurement owns on a `.table-scroll` wrapper.
+ * They are cleared together, so a wrapper that has stopped scrolling cannot
+ * keep a focus stop, a role, or a label pointing at a heading — a stale name on
+ * an inert element is what the keyboard reader trips over.
+ */
+const SCROLL_REGION_ATTRIBUTES = ['tabindex', 'role', 'aria-labelledby', 'aria-label'] as const;
+
+/**
+ * Slack allowed between `scrollWidth` and `clientWidth` before a container
+ * counts as scrollable. Both are integers rounded from a fractional layout, so
+ * a table that exactly fills its column can report a 1px difference; taking
+ * that for overflow would reinstate the inert focus stop.
+ */
+const SCROLL_OVERFLOW_TOLERANCE_PX = 1;
+
+/** Set an attribute to `value`, or remove it entirely when `value` is null. */
+function setAttributeOrRemove(element: Element, name: string, value: string | null): void {
+  if (value === null) {
+    element.removeAttribute(name);
+  } else {
+    element.setAttribute(name, value);
+  }
+}
+
+/**
+ * How many headings an `aria-labelledby` may chain. Two: the subsection the
+ * table sits in, and the section that subsection belongs to.
+ *
+ * One alone is not enough on these pages. A tool reference repeats the same
+ * `### Schema` under every `## <tool name>`, so naming a table after its
+ * nearest heading produces three regions all called "Schema" on /docs/tools —
+ * named, but indistinguishable to someone tabbing through them. A third level
+ * would only add the page title every name already implies.
+ */
+const SECTION_LABEL_HEADING_LIMIT = 2;
+
+/**
+ * IDs of the headings that title the section a table sits in, outermost first,
+ * or an empty list when the table precedes every heading on the page.
+ *
+ * A scroll container that is a Tab stop needs an accessible name, and the
+ * headings above the table are the names the reader just passed — they need no
+ * new translation key, and every heading this renderer emits carries an ID.
+ * `aria-labelledby` takes a list of IDs and concatenates their text, so
+ * "code_search Schema" is assembled by reference rather than by building a
+ * string this component would have to punctuate for five languages.
+ *
+ * The walk goes backwards through previous siblings and then climbs to the
+ * parent to continue there, because marked's output is flat only in the common
+ * case: the table's immediate predecessor is usually a `<p>` or a `<pre>`, and
+ * the heading is several siblings back. A heading only counts when it is
+ * shallower than the last one taken — a flat document has no ancestors to
+ * climb, so heading depth is what identifies the enclosing section, and the
+ * same depth test keeps an earlier sibling subsection out of the name. `root`
+ * bounds the climb so the search can never name a docs table after a heading
+ * belonging to the page chrome.
+ */
+function findSectionHeadingIds(wrapper: Element, root: Element): string[] {
+  const headingIds: string[] = [];
+  let takenDepth = Number.POSITIVE_INFINITY;
+  for (let node: Element | null = wrapper; node !== null && node !== root; node = node.parentElement) {
+    for (let sibling = node.previousElementSibling; sibling !== null; sibling = sibling.previousElementSibling) {
+      if (!/^H[1-6]$/.test(sibling.tagName) || sibling.id === '') continue;
+      const depth = Number(sibling.tagName.slice(1));
+      if (depth >= takenDepth) continue;
+      headingIds.unshift(sibling.id);
+      takenDepth = depth;
+      if (headingIds.length === SECTION_LABEL_HEADING_LIMIT) return headingIds;
+    }
+  }
+  return headingIds;
+}
+
+/**
+ * Text of the wrapped table's caption, or null when it has none. The fallback
+ * name for a table that no heading precedes: a caption is authored copy in the
+ * page's own language, so it reads as well as a heading would.
+ */
+function findTableCaptionText(wrapper: Element): string | null {
+  const caption = wrapper.querySelector('caption')?.textContent?.trim() ?? '';
+  return caption === '' ? null : caption;
+}
+
 interface MarkdownRendererProps {
   content: string;
 }
@@ -204,7 +350,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
       const href = rewriteDocHref(token.href);
       return Renderer.prototype.link.call(this, href === token.href ? token : { ...token, href });
     };
-    // Two attributes are added here, both absent from the default output:
+    // Three attributes are added here, all absent from the default output:
     // - lang="en": inline code in a localized page is English (identifiers,
     //   CLI flags, log lines), so it is marked up per WCAG 2.1 SC 3.1.2
     //   (Language of Parts) — without it a screen reader voices English with
@@ -212,11 +358,26 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
     // - font-size: inherit inside a heading: the stylesheet sizes inline code
     //   for body text, which would render a section title (a tool name is a
     //   whole heading) smaller than its own subsections.
+    // - class="code-nowrap" on a body chip that fits the prose column: the
+    //   paired stylesheet rule holds it on one line, so the bordered chip is
+    //   painted once instead of once per line box (see
+    //   INLINE_CODE_NOWRAP_MAX_COLUMNS for the budget, why a longer span must
+    //   keep wrapping, and why heading code is outside the gate).
     renderer.codespan = function (token: Tokens.Codespan) {
       const codeHtml = Renderer.prototype.codespan.call(this, token);
+      // Built as one merged class attribute rather than two: two `class=`
+      // attributes on one tag would leave the second silently ignored by the
+      // HTML parser. The two names are mutually exclusive today, since the
+      // nowrap budget is a body-text measurement, but the composition keeps a
+      // future third class from reintroducing that bug.
+      const classNames = [
+        renderingHeading ? 'docs-heading-code' : '',
+        !renderingHeading && measureCodeColumns(token.text) <= INLINE_CODE_NOWRAP_MAX_COLUMNS ? 'code-nowrap' : '',
+      ].filter((className) => className !== '');
       const attributes = [
         language === 'en' ? '' : ' lang="en"',
-        renderingHeading ? ' class="docs-heading-code" style="font-size:inherit"' : '',
+        classNames.length === 0 ? '' : ` class="${classNames.join(' ')}"`,
+        renderingHeading ? ' style="font-size:inherit"' : '',
       ].join('');
       // Anchored, so the rewrite can only ever touch the opening tag the
       // default renderer just produced and never a `<code>` sequence that came
@@ -235,15 +396,22 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
     // widens the whole document. Wrap each table in a scroll container — the
     // treatment fenced code blocks already get — rather than making the table
     // itself a scroll container, which would cost its native table semantics.
-    // tabindex makes the off-screen columns reachable by keyboard; the visual
-    // styles live in docs-markdown.css.
+    // The visual styles live in docs-markdown.css.
+    //
+    // The wrapper is emitted inert: no tabindex, no role and no aria-*.
+    // Whether it scrolls is a measured property of the laid-out page — the same
+    // table fits the column at 1280px and overflows at 375px — so a tabindex
+    // baked into the markup would plant an unnamed, role-less focus stop
+    // mid-article on every width where there is nothing to scroll. The effect
+    // below measures each wrapper and adds the keyboard affordance only where
+    // it does something.
     //
     // Call the default renderer through the call-time `this`: marked copies
     // these overrides onto a renderer of its own and assigns `parser` only to
     // that one, so a pre-bound copy of the default would run without a parser.
     const renderDefaultTable = renderer.table;
     renderer.table = function (token) {
-      return `<div class="table-scroll" tabindex="0">${renderDefaultTable.call(this, token)}</div>\n`;
+      return `<div class="table-scroll">${renderDefaultTable.call(this, token)}</div>\n`;
     };
     const instance = new Marked({ gfm: true, breaks: false, renderer });
     return DOMPurify.sanitize(instance.parse(content) as string);
@@ -335,6 +503,91 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
     // handleCopy is a stable useCallback([]) from useCopyToast, so listing it
     // cannot re-trigger this effect; copyLabel changes only on a locale switch.
   }, [html, copyLabel, handleCopy]);
+
+  // Give a table's scroll container its keyboard affordance only where the
+  // container actually scrolls, which is a property of the laid-out page and
+  // not of the markup: the same table fits the article column at 1280px and
+  // overflows it at 375px. A wrapper that overflows becomes a Tab stop — its
+  // off-screen columns are unreachable by keyboard otherwise — and is named
+  // after the section it belongs to so the stop announces something; a wrapper
+  // that does not overflow surrenders every one of those attributes.
+  //
+  // A layout effect, so the measurement lands in the same paint as the content:
+  // with a passive effect the reader would get one painted frame in which a
+  // table that scrolls is unreachable by keyboard, and pressing Tab inside it
+  // would be a race against the effect queue.
+  useLayoutEffect(() => {
+    const root = containerRef.current;
+    if (!root) return;
+    const wrappers = Array.from(root.querySelectorAll<HTMLElement>('.table-scroll'));
+    if (wrappers.length === 0) return;
+
+    const measure = () => {
+      wrappers.forEach((wrapper) => {
+        if (wrapper.scrollWidth - wrapper.clientWidth <= SCROLL_OVERFLOW_TOLERANCE_PX) {
+          // Taking tabindex off the element that currently holds focus would
+          // drop the reader to <body> on a mere resize, so a focused wrapper
+          // keeps what it has; the focusout listener below re-measures it the
+          // moment focus moves on, which is when releasing it is free.
+          if (document.activeElement === wrapper) return;
+          SCROLL_REGION_ATTRIBUTES.forEach((attribute) => wrapper.removeAttribute(attribute));
+          return;
+        }
+        wrapper.setAttribute('tabindex', '0');
+        const headingIds = findSectionHeadingIds(wrapper, root);
+        const labelledBy = headingIds.length === 0 ? null : headingIds.join(' ');
+        const captionText = labelledBy === null ? findTableCaptionText(wrapper) : null;
+        setAttributeOrRemove(wrapper, 'aria-labelledby', labelledBy);
+        setAttributeOrRemove(wrapper, 'aria-label', captionText);
+        // An unnamed region is not exposed as a region at all, so a wrapper
+        // neither a heading nor a caption can name keeps the Tab stop it needs
+        // and no role, rather than a role that announces nothing.
+        setAttributeOrRemove(wrapper, 'role', labelledBy === null && captionText === null ? null : 'region');
+      });
+    };
+
+    // Only a wrapper losing focus can settle the deferral above, so the
+    // listener ignores the rest of the article's focus traffic: bound to the
+    // whole container it would re-measure every wrapper on each of the dozen
+    // Tab presses it takes to cross a page of code blocks, for nothing.
+    const releaseOnFocusOut = (event: FocusEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLElement && target.classList.contains('table-scroll')) measure();
+    };
+
+    measure();
+    // Deliberately synchronous rather than batched into the next frame: the
+    // browser coalesces resize to one event per animation frame already, the
+    // measurement reads a layout the resize paint has to compute regardless,
+    // and deferring it would leave one painted frame in which a table that now
+    // scrolls has no keyboard affordance — the very gap the layout effect exists
+    // to close.
+    window.addEventListener('resize', measure);
+    root.addEventListener('focusout', releaseOnFocusOut);
+    // A width change with no window resize behind it — the docs sub-toolbar
+    // collapsing, a web font arriving, a mermaid diagram replacing a <pre>
+    // above the table — reaches us only through an observer. The callback sets
+    // attributes and never geometry, so the observation cannot feed itself.
+    // jsdom has no ResizeObserver, hence the capability check the rest of the
+    // codebase uses as well.
+    const observer = 'ResizeObserver' in window ? new ResizeObserver(measure) : null;
+    if (observer) {
+      wrappers.forEach((wrapper) => {
+        observer.observe(wrapper);
+        const table = wrapper.querySelector('table');
+        if (table) observer.observe(table);
+      });
+    }
+
+    return () => {
+      window.removeEventListener('resize', measure);
+      root.removeEventListener('focusout', releaseOnFocusOut);
+      observer?.disconnect();
+    };
+    // Keyed on the rendered HTML: a navigation or a locale switch replaces the
+    // container's contents, which resets every wrapper to the inert markup and
+    // needs a fresh measurement of fresh elements.
+  }, [html]);
 
   // Drive the live region: fill it while the toast is shown, then empty it once
   // the fade-out has finished. The default aria-relevant ("additions text")

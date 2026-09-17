@@ -4,6 +4,19 @@
 import DOMPurify from 'dompurify';
 import { Marked, type Token, type Tokens } from 'marked';
 
+/**
+ * A trailing `{#id}` marker, which pins a heading's anchor so one section keeps
+ * a single ID across all five locales instead of slugging from its own
+ * translated title.
+ *
+ * The character class stays permissive on purpose. Recognizing a marker is what
+ * strips it from the rendered heading and from the TOC label, so a marker
+ * carrying an ID an author should not have picked must still be recognized -
+ * narrowing the pattern would leave that marker to render as literal `{#...}`
+ * text in the middle of a title. What a marker owes its ID is stated by
+ * `isFragmentSafeHeadingId` below, and `headingId.test.ts` holds the ID of
+ * every marker on the shipped Tools pages to it.
+ */
 const explicitHeadingIdPattern = /\s+\{#([a-zA-Z0-9][a-zA-Z0-9_.:-]*)\}\s*$/;
 
 /**
@@ -78,15 +91,25 @@ export function legacyHeadingId(text: string): string {
  * (such as the old position-dependent `-15`) makes `querySelector('#-15')`
  * throw.
  *
- * This gates ALIAS emission only, and deliberately not primary IDs. A primary
- * ID is an anchor the documentation already publishes, and some of them do
- * start with a digit because the heading does (`1-disable-a-tool`) - the Korean
- * pages pin exactly those with explicit `{#id}` markers, so re-slugging them
- * would break every link written against them. Nothing resolves a heading
- * through a CSS selector either: the fragment scroll and the TOC scroll both go
- * through `document.getElementById`, which accepts any non-empty ID. An alias
- * is a new anchor with nothing published against it, so it is held to the
- * stricter bar instead of being emitted in a form a selector would reject.
+ * Every `{#id}` marker in the documentation is expected to satisfy this. A
+ * marker is authored metadata, so an ID a selector rejects is a typo rather
+ * than a fact about the heading: the Tools pages pin their two numbered
+ * "Customizing tools" sections as `{#disable-a-tool}` and
+ * `{#re-describe-a-tool}` in all five locales for exactly that reason, because
+ * written as `{#1-disable-a-tool}` they handed
+ * `document.querySelector('#1-disable-a-tool')` a selector it rejects.
+ *
+ * The predicate itself gates ALIAS emission, and deliberately not primary IDs.
+ * A heading with no marker still slugs from its own text, so a title that
+ * begins with a digit ("401 / 403 from `ocr llm test`") still yields a
+ * digit-leading primary ID. Those are anchors the documentation already
+ * publishes, and re-slugging them would break every link written against them,
+ * so they stand: nothing resolves a heading through a CSS selector either -
+ * the fragment scroll and the TOC scroll both go through
+ * `document.getElementById`, which accepts any non-empty ID, and `CSS.escape`
+ * covers a caller that genuinely needs a selector. An alias is a new anchor
+ * with nothing published against it, so it is held to the stricter bar instead
+ * of being emitted in a form a selector would reject.
  */
 export function isFragmentSafeHeadingId(id: string): boolean {
   return /^[\p{L}_][^\s"#]*$/u.test(id);
