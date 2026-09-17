@@ -335,8 +335,12 @@ When there are no matches, the tool returns the literal string
   file and keeps only the first 100 lines across all files; when more than
   100 lines came back the output is prefixed with `Note: The results have
   been truncated. Only showing first 100 results.`.
-- Empty / whitespace-only `search_text` returns `Error: search_text is
-  blank` instead of expanding to every line.
+- Rejects a `search_text` it cannot hand to git in-process, returning an
+  error string without running a search: empty / whitespace-only gives
+  `Error: search_text is blank` instead of expanding to every line, one
+  containing a NUL byte gives `Error: search_text contains invalid
+  characters`, and one longer than **16 KiB** gives `Error: search_text
+  is too long`.
 - Searches the **current working tree** in workspace mode, or the
   resolved target ref in range / commit mode (the `FileReader.Ref` is
   passed as a positional argument to `git grep`).

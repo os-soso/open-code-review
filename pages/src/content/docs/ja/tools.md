@@ -304,7 +304,10 @@ Match lines: 1
 - 出力は合計 **100 行**までに制限されます。`git grep --max-count` はファイルごとの制限なので、ツールは
   ファイルごとに上限より 1 行多く git に要求し、全ファイルを通して先頭 100 行のみを保持します。結果が 100 行を超えた場合、出力の前に
   `Note: The results have been truncated. Only showing first 100 results.` が付加されます。
-- 空 / 空白のみの `search_text` は、各行に展開されるのではなく `Error: search_text is blank` を返します。
+- git に渡せない `search_text` はプロセス内で拒否され、検索を実行せずにエラー文字列が返ります。空 / 空白のみの場合は、
+  各行に展開されるのではなく `Error: search_text is blank`、NUL バイトを含む場合は
+  `Error: search_text contains invalid characters`、**16 KiB** を超える場合は
+  `Error: search_text is too long` を返します。
 - ワークスペースモードは**現在のワークツリー**を検索し、区間 / commit モードは解決された対象の ref を検索します
   （`FileReader.Ref` が位置引数として `git grep` に渡されます）。
 

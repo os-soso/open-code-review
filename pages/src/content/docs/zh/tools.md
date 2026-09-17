@@ -303,8 +303,10 @@ Match lines: 1
 - 输出总量上限为 **100 行结果**。`git grep --max-count` 是每文件的限制，因此工具向 git
   请求每文件比上限多一行，并只保留跨所有文件的前 100 行；当返回的结果超过 100 行时，输出前会加
   `Note: The results have been truncated. Only showing first 100 results.`。
-- 空 / 仅空白的 `search_text` 返回 `Error: search_text is blank`，而不是展开成
-  每一行。
+- 无法交给 git 的 `search_text` 会在进程内被拒绝，不执行搜索而直接返回错误字符串：空 / 仅空白
+  返回 `Error: search_text is blank`，而不是展开成每一行；含 NUL 字节的返回
+  `Error: search_text contains invalid characters`；超过 **16 KiB** 的返回
+  `Error: search_text is too long`。
 - 工作区模式搜索**当前工作树**，区间 / commit 模式搜索解析出的目标 ref
   （`FileReader.Ref` 作为位置参数传给 `git grep`）。
 

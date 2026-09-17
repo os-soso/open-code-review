@@ -17,6 +17,16 @@ import (
 const (
 	gitGrepMaxCount = 100
 	gitGrepTimeout  = 10 * time.Second
+
+	// Longest search_text that can be handed to git as a single argv entry.
+	// The limit is a platform property, not a git one: Linux rejects an
+	// argument above 128 KiB (MAX_ARG_STRLEN) with "argument list too long"
+	// and Windows caps the whole command line at 32767 characters. git also
+	// echoes the pattern back verbatim in its own "-e option" diagnostics, so
+	// an unbounded pattern would return an unbounded error string as well.
+	// The bound is in bytes because that is what an argv entry counts, and
+	// 16 KiB is far beyond any real search term.
+	gitGrepMaxSearchTextBytes = 16 * 1024
 )
 
 // CodeSearchProvider performs text search across the repository using git grep.
@@ -142,6 +152,24 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		return "Error: ref must not start with '-'", nil
 	}
 
+	// git is started with an argv and never through a shell, so the pattern
+	// needs no quoting - but two shapes cannot cross the process boundary at
+	// all, and letting them try surfaces an os/exec failure that names
+	// absolute host paths (the resolved git binary, the repository directory)
+	// instead of anything the model can act on. Reject them here, in the same
+	// "Error: ..." result-string-with-nil-error form the ref guard above and
+	// the blank-search_text guard in Execute use.
+	if strings.Contains(searchText, "\x00") {
+		// NUL is the one byte an argv entry cannot carry: os/exec rejects the
+		// whole command with "invalid argument" before git is started. Tabs
+		// and newlines are deliberately left alone - git reads a
+		// newline-separated -e value as several patterns, which is valid.
+		return "Error: search_text contains invalid characters", nil
+	}
+	if len(searchText) > gitGrepMaxSearchTextBytes {
+		return "Error: search_text is too long", nil
+	}
+
 	outStr, errStr, err := p.runGitGrep(ctx, cmdArgs)
 
 	// Non-git directory: `git grep` exits 128 with "not a git repository".
@@ -171,6 +199,15 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 			}
 			trimmedErr := trimGitUsage(errStr, exitCode)
 			if trimmedErr == "" {
+				if exitErr == nil {
+					// git never ran - os/exec could not start it, or RepoDir
+					// does not exist - so there is no git diagnostic to pass
+					// on and the Go error text is all that is left. That text
+					// embeds absolute host paths, so report a fixed message
+					// rather than wrapping it. Errors from a git that did run
+					// keep flowing below, including its own "fatal:" lines.
+					return "", errors.New("git grep failed to start")
+				}
 				return "", fmt.Errorf("git grep failed: %w", err)
 			}
 			return "", fmt.Errorf("git grep failed: %w: %s", err, trimmedErr)

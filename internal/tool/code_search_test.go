@@ -308,6 +308,118 @@ func TestGitGrep_PerlRegexp_InvalidPattern_ReturnsError(t *testing.T) {
 	}
 }
 
+// TestGitGrep_RejectsUnusableSearchText pins the argv-boundary guard. A NUL
+// byte and an over-long pattern cannot be handed to git at all - os/exec
+// rejects the first outright and the platform rejects the second as an
+// over-long argument - and letting either reach the process surfaced a raw
+// os/exec error naming absolute host paths. Both are refused in-process
+// instead, as an "Error: ..." result string with a nil error, which is the
+// same graceful shape the blank-search_text and option-like-ref guards use.
+func TestGitGrep_RejectsUnusableSearchText(t *testing.T) {
+	tests := []struct {
+		name       string
+		searchText string
+		want       string
+	}{
+		{
+			name:       "nul byte",
+			searchText: "Hello\x00world",
+			want:       "Error: search_text contains invalid characters",
+		},
+		{
+			name:       "one byte past the length cap",
+			searchText: strings.Repeat("a", gitGrepMaxSearchTextBytes+1),
+			want:       "Error: search_text is too long",
+		},
+		{
+			name:       "a 128 KiB pattern",
+			searchText: strings.Repeat("a", 131072),
+			want:       "Error: search_text is too long",
+		},
+		{
+			name:       "a 1 MiB pattern",
+			searchText: strings.Repeat("a", 1048576),
+			want:       "Error: search_text is too long",
+		},
+	}
+
+	dir := setupTestRepo(t)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+			result, err := p.gitGrep(context.Background(), tt.searchText, true, false, nil)
+			if err != nil {
+				t.Fatalf("expected the rejection as a result string with a nil error, got: %v", err)
+			}
+			if result != tt.want {
+				t.Errorf("gitGrep() = %q, want %q", result, tt.want)
+			}
+		})
+	}
+}
+
+// TestGitGrep_AcceptsSearchTextAtLengthCap pins the length guard's boundary: a
+// pattern of exactly gitGrepMaxSearchTextBytes is still handed to git. It
+// asserts only that the guard did not fire and that git was started, because
+// whether a particular platform can carry a 16 KiB argv entry is a property of
+// that platform rather than a contract of this guard.
+func TestGitGrep_AcceptsSearchTextAtLengthCap(t *testing.T) {
+	dir := setupTestRepo(t)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+
+	result, err := p.gitGrep(context.Background(), strings.Repeat("a", gitGrepMaxSearchTextBytes), true, false, nil)
+	if result == "Error: search_text is too long" {
+		t.Errorf("a pattern of exactly %d bytes must not be rejected as too long", gitGrepMaxSearchTextBytes)
+	}
+	if err != nil && strings.Contains(err.Error(), "git grep failed to start") {
+		t.Errorf("git was not started for a pattern at the length cap: %v", err)
+	}
+}
+
+// TestGitGrep_ExecFailureDoesNotLeakHostPaths pins the error text for the case
+// where git never ran. os/exec names the resolved git binary or the repository
+// directory in its own message ("chdir /abs/path: no such file or directory"),
+// and that absolute host path must not reach the model, so gitGrep reports a
+// fixed message instead of wrapping the Go error.
+func TestGitGrep_ExecFailureDoesNotLeakHostPaths(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does", "not", "exist")
+	p := NewCodeSearch(&FileReader{RepoDir: missing, Ref: "", Mode: ModeWorkspace})
+
+	result, err := p.gitGrep(context.Background(), "Hello", false, false, nil)
+	if err == nil {
+		t.Fatal("expected an error when the repository directory does not exist")
+	}
+	if result != "" {
+		t.Errorf("expected an empty result when git could not be started, got: %s", result)
+	}
+	if got := err.Error(); got != "git grep failed to start" {
+		t.Errorf("err = %q, want %q", got, "git grep failed to start")
+	}
+	if strings.Contains(err.Error(), missing) {
+		t.Errorf("error text leaks the absolute repository path: %s", err.Error())
+	}
+}
+
+// TestGitGrep_GitDiagnosticStillReachesTheCaller pins the other half of that
+// contract: when git did run and explained the failure itself, its trimmed
+// stderr must still reach the caller. The assertion is on the prefix rather
+// than on the word "fatal", which git translates; "exit status 128" comes from
+// os/exec and is locale-independent, and the trailing ": " proves a diagnostic
+// was appended rather than the fixed no-start message being used.
+func TestGitGrep_GitDiagnosticStillReachesTheCaller(t *testing.T) {
+	dir := setupTestRepo(t)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "nonexistent_ref_abc123", Mode: ModeCommit})
+
+	_, err := p.gitGrep(context.Background(), "Hello", false, false, nil)
+	if err == nil {
+		t.Fatal("expected an invalid ref to return an error")
+	}
+	const wrapOnly = "git grep failed: exit status 128"
+	if got := err.Error(); !strings.HasPrefix(got, wrapOnly+": ") {
+		t.Errorf("expected git's own diagnostic appended after %q, got: %v", wrapOnly, got)
+	}
+}
+
 func TestTrimGitUsage(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -580,6 +692,34 @@ func TestCodeSearchProvider_Execute_BlankSearchText(t *testing.T) {
 	}
 	if got != "Error: search_text is blank" {
 		t.Errorf("Execute() = %q, want blank error", got)
+	}
+}
+
+// TestCodeSearchProvider_Execute_RejectsUnusableSearchText checks the same two
+// guards through the tool's own front door, the shape an LLM tool call takes
+// (a NUL byte arrives from JSON as "\u0000"): both must come back as an
+// "Error: ..." result string with a nil error, like the blank-search_text
+// case, rather than as a Go error propagated out of Execute.
+func TestCodeSearchProvider_Execute_RejectsUnusableSearchText(t *testing.T) {
+	dir := setupTestRepo(t)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+
+	got, err := p.Execute(context.Background(), map[string]any{"search_text": "Hello\x00world"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "Error: search_text contains invalid characters" {
+		t.Errorf("Execute() = %q, want the invalid-characters error", got)
+	}
+
+	got, err = p.Execute(context.Background(), map[string]any{
+		"search_text": strings.Repeat("a", gitGrepMaxSearchTextBytes+1),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "Error: search_text is too long" {
+		t.Errorf("Execute() = %q, want the too-long error", got)
 	}
 }
 
