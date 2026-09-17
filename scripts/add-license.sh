@@ -106,6 +106,9 @@ while IFS= read -r file; do
 
   ADDED=$((ADDED + 1))
   echo "  Added: $file"
-done < <(git ls-files)
+# Tracks the enumeration of scripts/verify-license.sh: the gate names this script as
+# the remediation, so it has to reach every file the gate can flag: untracked ones
+# included, ignored ones excluded.
+done < <(git ls-files --cached --others --exclude-standard)
 
 echo "Done. Added license headers to $ADDED file(s)."

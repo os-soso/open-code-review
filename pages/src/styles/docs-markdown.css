@@ -4,6 +4,11 @@
   font-size: 14px;
   line-height: 24px;
   color: rgba(255, 255, 255, 0.7);
+  /* Kinsoku shori: the default 'auto' strictness lets a line start with a
+     Japanese small kana, which splits words such as FILE/fairu after its first
+     glyph. 'strict' forbids those break opportunities; it is inherited by the
+     whole article and is a no-op for non-CJK scripts. */
+  line-break: strict;
 }
 
 .docs-markdown h1 {
@@ -38,15 +43,39 @@
   line-height: 22px;
 }
 
+/* Headings are the targets of every fragment link (deep links, in-content '#'
+   clicks and the table of contents). A scroll that aligns a heading with the top
+   of the viewport parks it under the 72px fixed navbar, so reserve the navbar's
+   height plus clearance: the same 90px offset DocsPage's scrollToHeading applies
+   by hand, which keeps native fragment navigation, scrollIntoView and the TOC
+   landing on the identical position. */
+.docs-markdown h1,
+.docs-markdown h2,
+.docs-markdown h3,
+.docs-markdown h4,
+.docs-markdown h5,
+.docs-markdown h6 {
+  /* DocsPage publishes --docs-heading-offset from the live chrome height, so
+     the margin grows with the sub-toolbar that sits under the navbar below
+     1024px; 90px is the desktop value and the fallback outside DocsPage. */
+  scroll-margin-top: var(--docs-heading-offset, 90px);
+}
+
 .docs-markdown p {
   margin: 0 0 12px 0;
   color: rgba(255, 255, 255, 0.6);
   line-height: 24px;
 }
 
+/* In-prose links carry an underline at rest: the link colour alone is only
+   1.58:1 against the surrounding prose, so colour cannot be the sole cue that
+   text is a link (WCAG 1.4.1). The offset keeps the rule off CJK glyphs and
+   descenders; hover still answers with the opacity change. */
 .docs-markdown a {
   color: #2BDE5E;
-  text-decoration: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: break-word;
   transition: opacity 0.2s;
 }
 
@@ -64,6 +93,9 @@
   border-radius: 4px;
   padding: 2px 6px;
   color: rgba(255, 255, 255, 0.85);
+  /* An identifier or path has no break opportunity of its own, so a long chip
+     such as a config file path would otherwise run past a narrow viewport. */
+  overflow-wrap: break-word;
 }
 
 /* Code blocks */
@@ -91,26 +123,74 @@
 }
 
 /* Copy button: revealed on hover so it never obscures code while reading;
-   the translucent background keeps it legible over long lines. */
+   the translucent background keeps it legible over long lines. It is a real
+   <button>, so the user-agent button styling is reset here.
+
+   Target size: the control's own box is 32x32, comfortably clearing the 24x24
+   floor of WCAG 2.5.8. The painted chip stays 24x24 because a single-line code
+   block is only 30px tall, so a 32px chip would spill outside the <pre>: the
+   4px padding plus `background-clip: content-box` paint the background over the
+   content box only, and `border-radius: 8px` leaves the usual 4px radius there
+   (an inner corner radius is the outer radius minus the padding). With top:0 /
+   right:4px the chip and its 16x16 icon land on exactly the pixels they did as
+   a 24x24 div at top:4px / right:8px. */
 .docs-markdown pre .code-copy-btn {
   position: absolute;
-  top: 4px;
-  right: 8px;
+  top: 0;
+  right: 4px;
+  box-sizing: border-box;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
   display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
   padding: 4px;
+  border: none;
+  font: inherit;
+  color: inherit;
   cursor: pointer;
+  appearance: none;
   background: rgba(0, 0, 0, 0.7);
-  border-radius: 4px;
+  background-clip: content-box;
+  border-radius: 8px;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
 }
 
 .docs-markdown pre:hover .code-copy-btn {
   opacity: 1;
 }
 
+/* A focused control must be visible even when the <pre> is not hovered,
+   whichever way the focus arrived; :focus also covers engines without
+   :focus-visible support. */
+.docs-markdown pre .code-copy-btn:focus,
+.docs-markdown pre .code-copy-btn:focus-visible {
+  opacity: 1;
+}
+
+/* The ring itself is keyboard-only, so a mouse click does not leave one behind
+   on the chip. The negative outline offset keeps it on the painted 24x24 box,
+   so it never reaches outside the code block. */
+.docs-markdown pre .code-copy-btn:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.85);
+  outline-offset: -4px;
+}
+
+/* Pressed state, so an activation is visibly acknowledged under pointer,
+   keyboard and touch alike. */
+.docs-markdown pre .code-copy-btn:active {
+  opacity: 1;
+  background-color: rgba(255, 255, 255, 0.24);
+}
+
 /* The generic content-image rule below must not inflate the icon. */
 .docs-markdown pre .code-copy-btn img {
+  width: 16px;
+  height: 16px;
   margin: 0;
   border-radius: 0;
 }
@@ -150,6 +230,24 @@
 }
 
 /* Tables */
+/* A table is never laid out narrower than its own min-content width, so a wide
+   one used to burst out of the article column: the page itself gained up to
+   206px of horizontal scroll between 320px and 768px, cells were clipped by the
+   viewport edge, and between 768px and 1024px the table painted over the sticky
+   table of contents. The scroll container MarkdownRenderer wraps around every
+   table confines that overflow to the column — the treatment `pre code` above
+   already gives long code lines — while the table itself stays a table, so it
+   keeps filling the column and keeps its native semantics (giving the table its
+   own `display: block` would strip those from the accessibility tree). The
+   wrapper is focusable so the columns beyond the fold can be reached with the
+   keyboard alone, not just by dragging the scrollbar. */
+.docs-markdown .table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
 .docs-markdown table {
   width: 100%;
   border-collapse: separate;
@@ -274,6 +372,20 @@
 }
 
 .docs-markdown pre code::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+/* Scrollbar styling for wide tables — same treatment as the code blocks above */
+.docs-markdown .table-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+.docs-markdown .table-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.docs-markdown .table-scroll::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.15);
   border-radius: 3px;
 }

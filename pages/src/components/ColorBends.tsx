@@ -3,6 +3,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { hasWebGLSupport } from '../utils/webgl';
 import './ColorBends.css';
 
 const MAX_COLORS = 8;
@@ -161,6 +162,10 @@ export default function ColorBends({
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    // Without WebGL there is nothing to render: leave the container empty and
+    // silent rather than letting three.js log and throw. Callers that need a
+    // visible backdrop render their own fallback behind this component.
+    if (!hasWebGLSupport()) return;
 
     const scene = new THREE.Scene();
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);

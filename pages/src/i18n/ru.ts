@@ -11,6 +11,9 @@ export const ru: TranslationKeys = {
   'navbar.docs': 'Документация',
   'navbar.blog': 'Блог',
   'navbar.getStarted': 'Начать работу',
+  'navbar.ariaLabel': 'Основная навигация',
+  'navbar.menuLabel': 'Меню навигации',
+  'navbar.languageLabel': 'Сменить язык',
 
   // Hero
   'hero.title': 'Код-ревью с ИИ,\nпроверенное на миллионах реальных задач',
@@ -117,9 +120,16 @@ export const ru: TranslationKeys = {
   // Footer
   'footer.brand': 'Open Code Review',
   'footer.copyright': '© 2026. Все права защищены.',
+  'footer.ariaLabel': 'Подвал сайта',
+  'footer.languageLabel': 'Сменить язык',
 
   // Docs Page
   'docs.toc': 'Содержание',
+  'docs.toc.ariaLabel': 'На этой странице',
+  'docs.nav.ariaLabel': 'Навигация по документации',
+  'docs.nav.menuLabel': 'Все документы',
+  'docs.skipToContent': 'Перейти к содержимому',
+  'docs.copyCode': 'Скопировать код',
   'docs.install': 'Установка',
   'docs.config': 'ocr config',
   'docs.review': 'ocr review',
@@ -303,6 +313,11 @@ export const ru: TranslationKeys = {
   'docs.search.hint.select': 'Выбрать',
   'docs.search.hint.open': 'Открыть',
   'docs.search.hint.close': 'Закрыть',
+  // Accessible names for the search palette: the dialog, its text input and the
+  // results listbox are announced from these, since none has a visible label.
+  'docs.search.dialogLabel': 'Поиск по документации',
+  'docs.search.inputLabel': 'Искать в документации',
+  'docs.search.resultsLabel': 'Результаты поиска',
 
   // Blog
   'blog.title': 'Блог',

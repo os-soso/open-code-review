@@ -187,3 +187,296 @@ a {
     -webkit-text-fill-color: #ffffff;
   }
 }
+
+/* Docs right-hand table of contents.
+   The entries' hover, pressed and focus treatments have to be real CSS states,
+   which the component's inline styles could not express: hovering used to be
+   simulated in React state (so an entry whose id was empty stayed lit), there
+   was no pressed feedback at all, and the focus ring was whatever the browser
+   drew. Everything here is scoped to the .docs-toc* classes, so no other
+   surface is affected. */
+.docs-toc__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.docs-toc__item {
+  display: block;
+}
+
+.docs-toc__link {
+  display: block;
+  width: 100%;
+  /* A 22px line box with 11px above and below is a 44px pointer target, which
+     clears WCAG 2.2 SC 2.5.5 (Enhanced) rather than relying on SC 2.5.8's
+     spacing exception as the 22px rows did. */
+  padding: 11px 8px;
+  border: none;
+  border-radius: 6px;
+  background-color: transparent;
+  font-family: 'PingFang SC', -apple-system, sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 22px;
+  text-align: left;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s, transform 0.1s;
+}
+
+/* Sub-headings keep the 16px indent they had, measured from the entry padding. */
+.docs-toc__link--sub {
+  padding-left: 24px;
+}
+
+.docs-toc__link:hover {
+  color: rgba(255, 255, 255, 0.85);
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+/* Declared after :hover so the active entry keeps its colour while hovered. Its
+   hover feedback is carried by the background tint below instead, because the
+   entry a reader is most likely to point at is the section they are already in,
+   and that one used to answer the pointer with nothing at all. */
+.docs-toc__link[aria-current='location'] {
+  color: #2bde5e;
+  font-weight: 500;
+}
+
+.docs-toc__link[aria-current='location']:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Pressed feedback, distinct from both idle and hover. The transition is
+   dropped while pressed so the change lands on the press itself; releasing
+   animates back through the rule above. */
+.docs-toc__link:active,
+.docs-toc__link[aria-current='location']:active {
+  background-color: rgba(255, 255, 255, 0.16);
+  transform: translateX(1px);
+  transition: none;
+}
+
+/* An author-defined focus indicator: the UA ring was the only one, and it is
+   drawn in the platform's colour against this column's dark background. */
+.docs-toc__link:focus-visible {
+  outline: 2px solid #2bde5e;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .docs-toc__link {
+    transition: none;
+  }
+}
+
+/* ══ Authored interaction states: hover, pressed and focus ══════════════════
+   Components in this tree style themselves with inline React style objects,
+   and an inline declaration always beats a stylesheet rule. Every property
+   that has to change with interaction state is therefore declared here and
+   deliberately kept OUT of the component's inline style — that is what lets
+   the transitions those components declare actually run.
+   Scale (kept consistent across the site, and matching the values already in
+   use by the docs surfaces): hover rgba(255,255,255,0.06), pressed
+   rgba(255,255,255,0.12), selected docs row rgba(43,222,94,0.12) on the
+   #2BDE5E accent. Selected/active state is carried by data-active="true" so
+   a component can express it without an inline background.                  */
+
+/* Site-wide keyboard focus indicator (WCAG 2.4.7).
+   Chrome's UA `outline: auto` resolves to a near-black ring on this theme, so
+   the accent green is authored explicitly for every focusable element, with an
+   offset that keeps it legible against dark fills. :focus-visible (rather than
+   :focus) leaves mouse and touch activation unchanged. */
+:focus-visible {
+  outline: 2px solid #2BDE5E;
+  outline-offset: 2px;
+}
+
+/* Docs/blog search trigger. Its colours are declared inline by the component
+   and its border hover is driven from JS; the ring and the pressed state are
+   the parts a stylesheet can own. The ring repeats the global declaration on
+   purpose rather than relying on it: this control is the one that used to
+   suppress its indicator entirely, so the rule that restores it is pinned to
+   the control by name and survives any later narrowing of the global rule. */
+.search-trigger:focus-visible {
+  outline: 2px solid #2BDE5E;
+  outline-offset: 2px;
+}
+
+.search-trigger:active {
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.25);
+}
+
+/* Docs sidebar rows: the doc links and the group expander.
+   The label colour lives here too, so :hover can drive the `color 0.2s`
+   transition the row declares. */
+.docs-sidebar-row {
+  background: transparent;
+}
+
+.docs-sidebar-row-label {
+  color: rgba(255,255,255,0.7);
+}
+
+.docs-sidebar-row:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+.docs-sidebar-row:hover .docs-sidebar-row-label {
+  color: #ffffff;
+}
+
+.docs-sidebar-row:active {
+  background: rgba(255,255,255,0.12);
+}
+
+.docs-sidebar-row[data-active="true"] {
+  background: rgba(43,222,94,0.12);
+}
+
+.docs-sidebar-row[data-active="true"] .docs-sidebar-row-label {
+  color: #2BDE5E;
+}
+
+.docs-sidebar-row[data-active="true"]:hover {
+  background: rgba(43,222,94,0.18);
+}
+
+.docs-sidebar-row[data-active="true"]:active {
+  background: rgba(43,222,94,0.24);
+}
+
+/* Docs prev/next pagers. The label position is preserved by the component's
+   negative horizontal margin, so the padded hit area grows outwards. */
+.docs-pager {
+  background: transparent;
+  border-radius: 6px;
+}
+
+.docs-pager:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+.docs-pager:active {
+  background: rgba(255,255,255,0.12);
+}
+
+/* Top navigation tabs. The label's resting opacity lives here so :hover can
+   drive it; the selected tab keeps the opacity 1 it had inline. */
+.nav-tab {
+  background: transparent;
+}
+
+.nav-tab-label {
+  opacity: 0.6;
+}
+
+.nav-tab:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+.nav-tab:hover .nav-tab-label {
+  opacity: 1;
+}
+
+.nav-tab:active {
+  background: rgba(255,255,255,0.12);
+}
+
+.nav-tab[data-active="true"] .nav-tab-label {
+  opacity: 1;
+}
+
+/* "Get Started" call to action: a white pill that dims as it is pressed. */
+.nav-cta {
+  background: #ffffff;
+}
+
+.nav-cta:hover {
+  background: #f2f2f2;
+}
+
+.nav-cta:active {
+  background: #e6e6e6;
+}
+
+/* Icon-only navbar controls (locale badge, GitHub link). The element is a
+   44x44 hit area around a smaller glyph, so the hover fill is what makes that
+   area visible; the resting opacity lives here for the same reason as above. */
+.nav-icon-btn {
+  opacity: 0.6;
+  background: transparent;
+  border-radius: 8px;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.nav-icon-btn:hover {
+  opacity: 1;
+  background: rgba(255,255,255,0.06);
+}
+
+.nav-icon-btn:active {
+  opacity: 1;
+  background: rgba(255,255,255,0.12);
+}
+
+/* Locale dropdown options, shared by the navbar and the footer switchers. */
+.lang-menu-item {
+  background: transparent;
+}
+
+.lang-menu-item:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+.lang-menu-item:active {
+  background: rgba(255,255,255,0.12);
+}
+
+.lang-menu-item[data-active="true"] {
+  background: rgba(255,255,255,0.08);
+}
+
+.lang-menu-item[data-active="true"]:hover {
+  background: rgba(255,255,255,0.14);
+}
+
+/* The selected option needs its own pressed rule: `.lang-menu-item:active` and
+   `.lang-menu-item[data-active="true"]` have equal specificity, so without this
+   the later selected-state rule would win on press and the option would look
+   unchanged while being held down. */
+.lang-menu-item[data-active="true"]:active {
+  background: rgba(255,255,255,0.2);
+}
+
+/* Footer brand link: the label brightens rather than the row filling, which
+   suits a link that sits on the page background rather than in a menu. */
+.footer-link-label {
+  color: rgba(255,255,255,0.6);
+  transition: color 0.15s;
+}
+
+.footer-link:hover .footer-link-label {
+  color: #ffffff;
+}
+
+.footer-link:active .footer-link-label {
+  color: rgba(255,255,255,0.8);
+}
+
+/* Footer locale switcher. */
+.footer-lang-btn {
+  background: transparent;
+}
+
+.footer-lang-btn:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+.footer-lang-btn:active {
+  background: rgba(255,255,255,0.12);
+}

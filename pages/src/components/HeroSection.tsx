@@ -6,6 +6,7 @@ import ReactDOM from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import { useResponsive } from '../hooks/useResponsive';
+import { hasWebGLSupport } from '../utils/webgl';
 import ErrorBoundary from './ErrorBoundary';
 import npmIcon from '../assets/icons/npm.svg';
 import brewIcon from '../assets/icons/brew.svg';
@@ -220,6 +221,13 @@ const HeroSection: React.FC = () => {
   }, [menuOpen]);
 
   useEffect(() => {
+    // Keep the CSS gradient — and skip the shader chunk entirely — where WebGL
+    // is unavailable, so the hero degrades silently instead of logging a
+    // three.js failure that the ErrorBoundary then reports as well. The probe
+    // lives in its own three.js-free module so asking it here costs nothing in
+    // the main bundle.
+    if (!hasWebGLSupport()) return;
+
     // Wait until after the first paint before loading the heavy shader chunk.
     let secondFrame: number | undefined;
     const firstFrame = requestAnimationFrame(() => {

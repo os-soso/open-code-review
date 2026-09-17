@@ -11,6 +11,9 @@ export const zh: TranslationKeys = {
   'navbar.docs': '文档',
   'navbar.blog': '博客',
   'navbar.getStarted': '开始使用',
+  'navbar.ariaLabel': '主导航',
+  'navbar.menuLabel': '导航菜单',
+  'navbar.languageLabel': '切换语言',
 
   // Hero
   'hero.title': 'AI 代码审查\n百万真实任务验证',
@@ -119,9 +122,16 @@ export const zh: TranslationKeys = {
   // Footer
   'footer.brand': 'Open Code Review',
   'footer.copyright': '© 2026 版权所有。保留所有权利。',
+  'footer.ariaLabel': '网站页脚',
+  'footer.languageLabel': '切换语言',
 
   // Docs Page
   'docs.toc': '目录',
+  'docs.toc.ariaLabel': '本页内容',
+  'docs.nav.ariaLabel': '文档导航',
+  'docs.nav.menuLabel': '全部文档',
+  'docs.skipToContent': '跳到主要内容',
+  'docs.copyCode': '复制代码',
   'docs.install': '安装',
   'docs.config': 'ocr config',
   'docs.review': 'ocr review',
@@ -305,6 +315,11 @@ export const zh: TranslationKeys = {
   'docs.search.hint.select': '选择',
   'docs.search.hint.open': '打开',
   'docs.search.hint.close': '关闭',
+  // Accessible names for the search palette: the dialog, its text input and the
+  // results listbox are announced from these, since none has a visible label.
+  'docs.search.dialogLabel': '文档搜索',
+  'docs.search.inputLabel': '搜索文档',
+  'docs.search.resultsLabel': '搜索结果',
 
   // Blog
   'blog.title': '博客',

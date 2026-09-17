@@ -23,11 +23,23 @@ const STORAGE_KEY = 'ocr-lang';
 
 const SUPPORTED_LANGUAGES: Language[] = ['en', 'zh', 'ja', 'ko', 'ru'];
 
+// Resolves a language tag to one of SUPPORTED_LANGUAGES, or null when the tag
+// names a language the site does not translate. Only the primary subtag is
+// matched, case-insensitively: tags arrive carrying region and script subtags
+// ('zh-CN', 'zh-Hans-CN') from navigator.languages and, for a stored
+// preference, from whatever a legacy build or a hand edit left behind. Both
+// resolution paths below go through here, so the same tag can never resolve to
+// Chinese from the browser and to the 'en' fallback from storage.
+function normalizeLanguageTag(tag: string): Language | null {
+  const code = tag.toLowerCase().split('-')[0];
+  return SUPPORTED_LANGUAGES.includes(code as Language) ? (code as Language) : null;
+}
+
 function detectBrowserLanguage(): Language | null {
   try {
     for (const lang of navigator.languages ?? [navigator.language]) {
-      const code = lang.toLowerCase().split('-')[0];
-      if (SUPPORTED_LANGUAGES.includes(code as Language)) return code as Language;
+      const code = normalizeLanguageTag(lang);
+      if (code) return code;
     }
   } catch {}
   return null;
@@ -36,7 +48,10 @@ function detectBrowserLanguage(): Language | null {
 function getInitialLanguage(): Language {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored && SUPPORTED_LANGUAGES.includes(stored as Language)) return stored as Language;
+    if (stored) {
+      const code = normalizeLanguageTag(stored);
+      if (code) return code;
+    }
   } catch {}
   return detectBrowserLanguage() ?? 'en';
 }

@@ -45,8 +45,19 @@ jobs:
 
       - name: Check formatting
         run: |
-          unformatted="$(gofmt -s -l .)"
-          if [ -n "$unformatted" ]; then
+          # gofmt signals its two failure modes differently: a parseable but
+          # mis-formatted file is listed on stdout with exit 0, while a file it
+          # cannot parse is listed nowhere -- the parse error goes to stderr and
+          # the exit status is 2. So the status is checked first and stderr is
+          # captured with it; a stdout-only check reads that second mode as a
+          # clean tree. The assignment is the `if` condition because that form is
+          # exempt from errexit under the default `bash -e {0}` shell, so the
+          # diagnostics below still run instead of the step aborting bare.
+          if ! unformatted="$(gofmt -s -l . 2>&1)"; then
+            echo "::error::gofmt exited with an error. Fix the syntax error(s) reported below, then re-run:"
+            echo "$unformatted"
+            exit 1
+          elif [ -n "$unformatted" ]; then
             echo "::error::Not gofmt-clean. Run 'gofmt -s -w .' and commit:"
             echo "$unformatted"
             gofmt -s -d .
