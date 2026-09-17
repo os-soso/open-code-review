@@ -12,10 +12,21 @@ import icon4 from '../assets/icons/icon-feature-effort.svg';
 import icon5 from '../assets/icons/icon-feature-compression.svg';
 import icon6 from '../assets/icons/icon-feature-rules.svg';
 
-const FeaturesSection: React.FC = () => {
+interface FeaturesSectionProps {
+  /** Heading level for the section title. The landing page already opens with
+   *  the hero's h1, so the section stays an h2 there; the standalone /features
+   *  route renders nothing above it and promotes it to that page's only h1. */
+  headingLevel?: 'h1' | 'h2';
+}
+
+const FeaturesSection: React.FC<FeaturesSectionProps> = ({ headingLevel = 'h2' }) => {
   const { t } = useTranslation();
   const { isMobile, isTablet } = useResponsive();
   const titleStyle = useSectionTitleStyle();
+  /* Rendered through a variable tag so the level changes without duplicating
+   * the heading or its styles — the type scale is the section's, not the
+   * element's, so both levels look identical. */
+  const SectionTitle = headingLevel;
 
   const features = [
     { icon: icon1, title: t('features.feat1Title'), desc: t('features.feat1Desc') },
@@ -43,9 +54,9 @@ const FeaturesSection: React.FC = () => {
           <span style={{ color: '#2BDE5E', fontSize: 16, fontWeight: 500, lineHeight: '22px', letterSpacing: '0.48px' }}>
             {t('features.sectionBadge')}
           </span>
-          <h2 style={{ color: '#FFFFFF', fontSize: titleStyle.fontSize, fontWeight: 500, textAlign: 'center', lineHeight: titleStyle.lineHeight, letterSpacing: '0.96px', margin: 0, maxWidth: 758 }}>
+          <SectionTitle style={{ color: '#FFFFFF', fontSize: titleStyle.fontSize, fontWeight: 500, textAlign: 'center', lineHeight: titleStyle.lineHeight, letterSpacing: '0.96px', margin: 0, maxWidth: 758 }}>
             {t('features.title')}
-          </h2>
+          </SectionTitle>
           <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16, textAlign: 'center', lineHeight: '24px', margin: 0, maxWidth: 646 }}>
             {t('features.subtitle')}
           </p>

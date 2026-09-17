@@ -9,6 +9,9 @@ export const en = {
   'navbar.docs': 'Docs',
   'navbar.blog': 'Blog',
   'navbar.getStarted': 'Get Started',
+  'navbar.ariaLabel': 'Main navigation',
+  'navbar.menuLabel': 'Navigation menu',
+  'navbar.languageLabel': 'Change language',
 
   // Hero
   'hero.title': 'AI Code Review\nValidated on Millions of Real-World Tasks',
@@ -115,9 +118,16 @@ export const en = {
   // Footer
   'footer.brand': 'Open Code Review',
   'footer.copyright': '© Copyright 2026. All rights reserved.',
+  'footer.ariaLabel': 'Site footer',
+  'footer.languageLabel': 'Change language',
 
   // Docs Page (keep existing)
   'docs.toc': 'Table of Contents',
+  'docs.toc.ariaLabel': 'On this page',
+  'docs.nav.ariaLabel': 'Documentation navigation',
+  'docs.nav.menuLabel': 'All docs',
+  'docs.skipToContent': 'Skip to content',
+  'docs.copyCode': 'Copy code',
   'docs.install': 'Install',
   'docs.config': 'ocr config',
   'docs.review': 'ocr review',
@@ -301,6 +311,11 @@ export const en = {
   'docs.search.hint.select': 'Select',
   'docs.search.hint.open': 'Open',
   'docs.search.hint.close': 'Close',
+  // Accessible names for the search palette: the dialog, its text input and the
+  // results listbox are announced from these, since none has a visible label.
+  'docs.search.dialogLabel': 'Documentation search',
+  'docs.search.inputLabel': 'Search documentation',
+  'docs.search.resultsLabel': 'Search results',
 
   // Blog
   'blog.title': 'Blog',

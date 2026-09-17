@@ -8,6 +8,11 @@ import App from './App';
 import { LanguageProvider } from './i18n';
 import './styles/index.css';
 
+// Scroll restoration is the application's, not the browser's: the routes
+// render their content after the history entry has changed, so the browser
+// would restore an offset against a document that has not been laid out yet.
+// App's scroll manager records each entry's offset and restores it on a Back
+// or Forward instead, which is why this stays 'manual'.
 if ('scrollRestoration' in history) {
   history.scrollRestoration = 'manual';
 }

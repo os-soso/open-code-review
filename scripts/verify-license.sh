@@ -69,7 +69,10 @@ while IFS= read -r file; do
     FAILED+=("$file (invalid year: ${year:-none})")
     continue
   fi
-done < <(git ls-files)
+# The selectors are spelled out because plain `git ls-files` means --cached, i.e. the
+# index only: a new source file would first be checked the run after it is committed,
+# not before it lands. --exclude-standard keeps ignored paths out of the sweep.
+done < <(git ls-files --cached --others --exclude-standard)
 
 if [ "${#FAILED[@]}" -gt 0 ]; then
   echo "ERROR: The following files are missing or have invalid license headers:"

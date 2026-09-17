@@ -313,11 +313,14 @@ Match lines: 1
 
 ### 제한 {#limits}
 
-- `git grep --max-count 100`으로 **파일당 100건**까지만 받으므로, 파일이 많으면 전체
-  출력은 100건을 넘을 수 있습니다. 파일당 상한에 걸리면 출력 앞에 `Note: The results
-  have been truncated. Only showing first 100 results.`가 붙습니다.
-- `search_text`가 비어 있거나 공백뿐이면 모든 줄로 번지지 않고 `Error: search_text is
-  blank`를 반환합니다.
+- 출력은 전체 **100줄**까지만 반환합니다. `git grep --max-count`는 파일당 제한이므로, 도구는
+  파일당 상한보다 한 줄 더 git에 요청한 뒤 모든 파일을 합쳐 처음 100줄만 남깁니다. 결과가
+  100줄을 넘으면 출력 앞에 `Note: The results have been truncated. Only showing first 100
+  results.`가 붙습니다.
+- git에 넘길 수 없는 `search_text`는 검색을 실행하지 않고 프로세스 안에서 거부하며 오류
+  문자열을 반환합니다. 비어 있거나 공백뿐이면 모든 줄로 번지지 않고 `Error: search_text is
+  blank`, NUL 바이트가 있으면 `Error: search_text contains invalid characters`,
+  **16 KiB**보다 길면 `Error: search_text is too long`을 반환합니다.
 - 워크스페이스 모드에서는 **현재 작업 트리**를, range·commit 모드에서는 해석된 대상
   ref를 검색합니다(`FileReader.Ref`가 `git grep`에 위치 인자로 넘어갑니다).
 
@@ -341,7 +344,7 @@ Match lines: 1
 
 확장하는 방법은 두 가지입니다.
 
-### 1. 도구 끄기 {#1-disable-a-tool}
+### 1. 도구 끄기 {#disable-a-tool}
 
 `tools.json`을 복사해 원하지 않는 항목을 지운 뒤 실행합니다:
 
@@ -352,7 +355,7 @@ ocr review --tools ./my-tools.json
 예를 들어 추가 맥락을 전혀 읽지 않는 "코멘트 전용" 리뷰어를 원한다면
 `code_comment`와 `task_done`만 남기세요.
 
-### 2. 도구 설명 바꾸기 {#2-re-describe-a-tool}
+### 2. 도구 설명 바꾸기 {#re-describe-a-tool}
 
 `name`은 그대로 두고(내부적으로 이름으로 제공자를 찾습니다) `description`만 고쳐
 모델을 유도합니다. 프로젝트 고유의 지침을 넣는 가장 쉬운 방법입니다. 예를 들면

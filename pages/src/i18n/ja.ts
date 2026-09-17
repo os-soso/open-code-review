@@ -11,6 +11,9 @@ export const ja: TranslationKeys = {
   'navbar.docs': 'ドキュメント',
   'navbar.blog': 'ブログ',
   'navbar.getStarted': '始める',
+  'navbar.ariaLabel': 'メインナビゲーション',
+  'navbar.menuLabel': 'ナビゲーションメニュー',
+  'navbar.languageLabel': '言語を変更',
 
   // Hero
   'hero.title': 'AIコードレビュー\n数百万の実タスクで検証済み',
@@ -119,9 +122,16 @@ export const ja: TranslationKeys = {
   // Footer
   'footer.brand': 'Open Code Review',
   'footer.copyright': '© Copyright 2026. All rights reserved.',
+  'footer.ariaLabel': 'サイトフッター',
+  'footer.languageLabel': '言語を変更',
 
   // Docs Page
   'docs.toc': '目次',
+  'docs.toc.ariaLabel': 'このページの内容',
+  'docs.nav.ariaLabel': 'ドキュメントナビゲーション',
+  'docs.nav.menuLabel': 'すべてのドキュメント',
+  'docs.skipToContent': 'コンテンツへスキップ',
+  'docs.copyCode': 'コードをコピー',
   'docs.install': 'インストール',
   'docs.config': 'ocr config',
   'docs.review': 'ocr review',
@@ -305,6 +315,11 @@ export const ja: TranslationKeys = {
   'docs.search.hint.select': '選択',
   'docs.search.hint.open': '開く',
   'docs.search.hint.close': '閉じる',
+  // Accessible names for the search palette: the dialog, its text input and the
+  // results listbox are announced from these, since none has a visible label.
+  'docs.search.dialogLabel': 'ドキュメント検索',
+  'docs.search.inputLabel': 'ドキュメントを検索',
+  'docs.search.resultsLabel': '検索結果',
 
   // Blog
   'blog.title': 'ブログ',

@@ -9,7 +9,7 @@ schema、および入出力の例を記載します。完全な機械可読の�
 [`internal/config/toolsconfig/tools.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/toolsconfig/tools.json)
 にあります。
 
-## 各フェーズでのツールの利用可否
+## 各フェーズでのツールの利用可否 {#tool-availability-per-phase}
 
 各ツールは、**plan フェーズ**、**main task**、あるいはその両方のどこで利用できるかを宣言します：
 
@@ -33,7 +33,7 @@ schema、および入出力の例を記載します。完全な機械可読の�
 ツールレジストリを上書きするには、組み込みの定義と同じ形式の JSON ファイルパスを `--tools <path>` で渡します。
 これにより、ツールを無効化したり、説明を編集したり、既存の provider をベースに新しいツールを追加したりできます。
 
-## `task_done`
+## `task_done` {#taskdone}
 
 main ループを終了します。
 
@@ -52,12 +52,12 @@ agent は `task_done` を受け取ると、LLM の呼び出しを停止し、累
 呼び出しの処理を開始します。`task_done` は（結果がセッションログに記録される前に）即座に返されるため、`state` の値は受理されますが
 **永続化されず**——終了コードにも影響しません。
 
-## `code_comment`
+## `code_comment` {#codecomment}
 
 1 件または複数のレビューコメントを発行します。各コメントはコードスニペット（`existing_code`）にアンカーされ、
 OCR が行番号を自動計算できるようにします。
 
-### Schema
+### Schema {#schema}
 
 ```json
 {
@@ -87,7 +87,7 @@ OCR はモデルが現在のターンで出力した推論内容で自動的に�
 > `existing_code`、`suggestion_code` のみがあります）。より高性能なモデルが依然として `thinking` ブロックを発行した場合も
 > 永続化されます。ほとんどのモデルは発行しませんが、問題ありません。
 
-### アンカーアルゴリズム
+### アンカーアルゴリズム {#anchoring-algorithm}
 
 OCR は**動的なスライディングウィンドウ**を使って diff 内で `existing_code` テキストを検索します。マッチは順に試行されます：
 
@@ -102,7 +102,7 @@ OCR は**動的なスライディングウィンドウ**を使って diff 内で
 マッチは**空白に対して非依存**です：比較前に行を trim し、diff の `+`/`-` マーカーを取り除くため、インデントが
 正確に一致する必要はありません。最後の手段として、コメントは `start_line=0` で配信され、ユーザーに「問題は本物だが自分で位置を特定してほしい」と伝えます。
 
-### 例
+### 例 {#example}
 
 ```json
 {
@@ -116,11 +116,11 @@ OCR は**動的なスライディングウィンドウ**を使って diff 内で
 }
 ```
 
-## `file_read`
+## `file_read` {#fileread}
 
 ファイルの**変更後**の形式で一定範囲の行を読み取ります。
 
-### Schema
+### Schema {#schema}
 
 ```json
 {
@@ -139,7 +139,7 @@ OCR は**動的なスライディングウィンドウ**を使って diff 内で
 | `start_line` | いいえ | `1` | 1 始まりのインデックス。 |
 | `end_line` | いいえ | ファイル末尾 | 端点を含む。 |
 
-### 出力
+### 出力 {#output}
 
 ```
 File: src/foo.go (Total lines: 220)
@@ -155,7 +155,7 @@ LINE_RANGE: 10-80
 各行の内容には、1 始まりの行番号と `|` 区切り文字が前置され、モデルが後続の `code_comment` 呼び出しで
 行番号を正確に参照できるようにします。
 
-### 制限
+### 制限 {#limits}
 
 - **1 回の呼び出しで最大 500 行。** より大きな範囲は切り詰められ、`IS_TRUNCATED: true` が設定され、
   `Note: Results truncated to 500 lines. Please narrow your line range.` が追記されます。
@@ -164,12 +164,12 @@ LINE_RANGE: 10-80
 モデルが周辺のコンテキストを必要とする場合（diff 内でしか見えない関数についてコメントする際など）、diff の
 hunk ヘッダー `@@ -x,y +m,n @@` から範囲を計算すべきです——通常は `m-50` から `m+n+50` まで。
 
-## `file_read_diff`
+## `file_read_diff` {#filereaddiff}
 
 同一の変更セット内の 1 つまたは複数の*他の*ファイルの diff を読み取ります——コメントが関連ファイルの
 更新有無に依存する場合に有用です。
 
-### Schema
+### Schema {#schema}
 
 ```json
 {
@@ -180,7 +180,7 @@ hunk ヘッダー `@@ -x,y +m,n @@` から範囲を計算すべきです——�
 }
 ```
 
-### 出力
+### 出力 {#output}
 
 ```
 ==== FILE: src/api/handler.go ====
@@ -201,11 +201,11 @@ hunk ヘッダー `@@ -x,y +m,n @@` から範囲を計算すべきです——�
 `Error: diff not found for the requested paths` を返します。空の `path_array` は
 `Error: no files found` を返します。
 
-## `file_find`
+## `file_find` {#filefind}
 
 リポジトリ相対パスまたはファイル名のキーワード（部分文字列マッチ）でリポジトリ内のファイルを検索します。
 
-### Schema
+### Schema {#schema}
 
 ```json
 {
@@ -227,7 +227,7 @@ hunk ヘッダー `@@ -x,y +m,n @@` から範囲を計算すべきです——�
 スキップされますが、`Makefile`、`Dockerfile`、`LICENSE`、`Vagrantfile`、
 `Containerfile` は例外です。
 
-### 出力
+### 出力 {#output}
 
 改行区切りのパスのリスト：
 
@@ -240,17 +240,17 @@ src/main/java/com/example/internal/UserServiceImpl.java
 マッチするファイルがない場合（または `query_name` が空の場合）、ツールはリテラル文字列
 `// The file was not found` を返します。
 
-### 制限
+### 制限 {#limits}
 
 最大 **100** 件のマッチを返します。超過分は静かに切り詰められます。モデルがより広範な検索を必要とする場合は、
 `code_search` を使用すべきです。
 
-## `code_search`
+## `code_search` {#codesearch}
 
 リポジトリ全体の全文検索。`git grep` によって駆動されるため、`pathspec` 構文を理解し、
 `.gitignore` に従います。
 
-### Schema
+### Schema {#schema}
 
 ```json
 {
@@ -271,7 +271,7 @@ src/main/java/com/example/internal/UserServiceImpl.java
 | `case_sensitive` | いいえ | `false` | — |
 | `use_perl_regexp` | いいえ | `false` | `true` の場合、`search_text` は正規表現として扱われます。 |
 
-### 出力
+### 出力 {#output}
 
 結果はファイルごとにグループ化されます。各グループは `File: <path>` と `Match lines: <n>` で始まり、続いて各ヒットが
 `line|content` の 1 行で表されます：
@@ -289,7 +289,7 @@ Match lines: 1
 
 マッチがない場合、ツールはリテラル文字列 `No matches found` を返します。
 
-### pathspec クイックリファレンス
+### pathspec クイックリファレンス {#pathspec-cookbook}
 
 | 目的 | `file_patterns` |
 |---|---|
@@ -299,16 +299,21 @@ Match lines: 1
 | 単一のディレクトリのみ | `["src/api/"]` |
 | 複数の種類、vendor を除外 | `["*.go", "*.ts", ":(exclude)vendor/", ":(exclude)node_modules/"]` |
 
-### 制限
+### 制限 {#limits}
 
-- `git grep --max-count 100` によってファイルごとのヒット数上限を **100** に設定するため、複数ファイルにまたがる
-  合計出力は 100 を超える可能性があります。ファイルごとの上限に達した場合、出力の前に
-  `Note: The results have been truncated. Only showing first 100 results.` が付加されます。
-- 空 / 空白のみの `search_text` は、各行に展開されるのではなく `Error: search_text is blank` を返します。
+- 出力は合計 **100 行**までに制限されます。`git grep --max-count`
+  はファイルごとの制限なので、ツールはファイルごとに上限より 1 行多く git
+  に要求し、全ファイルを通して先頭 100 行のみを保持します。結果が 100 行を超えた場合、出力の前に
+  `Note: The results have been truncated. Only showing first 100 results.`
+  が付加されます。
+- git に渡せない `search_text` はプロセス内で拒否され、検索を実行せずにエラー文字列が返ります。空 / 空白のみの場合は、
+  各行に展開されるのではなく `Error: search_text is blank`、NUL バイトを含む場合は
+  `Error: search_text contains invalid characters`、**16 KiB** を超える場合は
+  `Error: search_text is too long` を返します。
 - ワークスペースモードは**現在のワークツリー**を検索し、区間 / commit モードは解決された対象の ref を検索します
   （`FileReader.Ref` が位置引数として `git grep` に渡されます）。
 
-## ツールの実行とエラー
+## ツールの実行とエラー {#tool-execution-errors}
 
 ツールは agent ループ内で同期的に実行されますが、2 つの例外があります：
 
@@ -322,11 +327,11 @@ Match lines: 1
 ツール名がレジストリに存在しない場合、OCR はクラッシュせず定数 `tool.NotAvailableMsg` を返します。これにより、
 （`--tools` を通じて）ランタイムでツールを無効化することが安全になります。
 
-## ツールのカスタマイズ
+## ツールのカスタマイズ {#customizing-tools}
 
 拡張方法は 2 つあります：
 
-### 1. ツールを無効化する
+### 1. ツールを無効化する {#disable-a-tool}
 
 `tools.json` をコピーし、不要なエントリを削除してから実行します：
 
@@ -337,7 +342,7 @@ ocr review --tools ./my-tools.json
 たとえば、追加のコンテキストを一切読み取らない「コメントのみ」のレビューアが欲しい場合は、`code_comment` と
 `task_done` のみを残します。
 
-### 2. ツールの説明を書き換える
+### 2. ツールの説明を書き換える {#re-describe-a-tool}
 
 `name` は保持し（provider は内部で name で検索します）、`description` を変更してモデルを誘導します。これは
 プロジェクト固有のガイダンスを注入する最も簡単な方法です——たとえば「`file_read` を使う際は、常に変更付近の少なくとも
@@ -346,7 +351,7 @@ ocr review --tools ./my-tools.json
 > **新しい**ツール*名*を追加するには Go 側での対応が必要です。`internal/tool/definitions.go` および
 > `internal/tool/` 配下の provider を参照してください。JSON ファイルだけでは新しい動作を追加できません。
 
-## 関連項目
+## 関連項目 {#see-also}
 
 - [アーキテクチャ](../architecture/)——agent ループがどのようにツールを駆動するか。
 - [レビュールール](../review-rules/)——LLM に何に注目すべきかを伝えます。

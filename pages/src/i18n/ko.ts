@@ -11,6 +11,9 @@ export const ko: TranslationKeys = {
   'navbar.docs': '문서',
   'navbar.blog': '블로그',
   'navbar.getStarted': '시작하기',
+  'navbar.ariaLabel': '주 내비게이션',
+  'navbar.menuLabel': '내비게이션 메뉴',
+  'navbar.languageLabel': '언어 변경',
 
   // Hero
   'hero.title': 'AI 코드 리뷰\n수백만 건의 실제 작업으로 검증되었습니다',
@@ -119,9 +122,16 @@ export const ko: TranslationKeys = {
   // Footer
   'footer.brand': 'Open Code Review',
   'footer.copyright': '© Copyright 2026. All rights reserved.',
+  'footer.ariaLabel': '사이트 푸터',
+  'footer.languageLabel': '언어 변경',
 
   // Docs Page
   'docs.toc': '목차',
+  'docs.toc.ariaLabel': '이 페이지 내용',
+  'docs.nav.ariaLabel': '문서 내비게이션',
+  'docs.nav.menuLabel': '전체 문서',
+  'docs.skipToContent': '본문으로 건너뛰기',
+  'docs.copyCode': '코드 복사',
   'docs.install': '설치',
   'docs.config': 'ocr config',
   'docs.review': 'ocr review',
@@ -305,6 +315,11 @@ export const ko: TranslationKeys = {
   'docs.search.hint.select': '선택',
   'docs.search.hint.open': '열기',
   'docs.search.hint.close': '닫기',
+  // Accessible names for the search palette: the dialog, its text input and the
+  // results listbox are announced from these, since none has a visible label.
+  'docs.search.dialogLabel': '문서 검색',
+  'docs.search.inputLabel': '문서 검색하기',
+  'docs.search.resultsLabel': '검색 결과',
 
   // Blog
   'blog.title': '블로그',

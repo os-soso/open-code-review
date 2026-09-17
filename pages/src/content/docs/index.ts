@@ -232,6 +232,20 @@ function stripFrontmatter(md: string): string {
 }
 
 /**
+ * Collapse every run of whitespace to a single space.
+ *
+ * Markdown sources hard-wrap long sentences, so a phrase the reader sees on one
+ * rendered line can carry a newline plus the next line's indentation in the
+ * source. Collapsing both the haystack and the needle makes search follow the
+ * rendered text rather than the source layout. Runs are collapsed, never
+ * removed, so leading and trailing whitespace in a query is preserved and the
+ * match stays a plain substring match.
+ */
+function collapseWhitespace(text: string): string {
+  return text.replace(/\s+/g, ' ');
+}
+
+/**
  * Get raw content for a slug in the given language, with English fallback.
  */
 function getRawContent(slug: DocSlug, language: string): string {
@@ -271,18 +285,21 @@ export function searchDocs(query: string, language: string): { slug: DocSlug; ti
   if (!query.trim()) return [];
   const langDocs = docsMap[language as Language] || docsMap.en;
   const results: { slug: DocSlug; title: string; snippet: string }[] = [];
-  const lowerQuery = query.toLowerCase();
+  const lowerQuery = collapseWhitespace(query.toLowerCase());
   const slugs = Object.keys(enDocs) as DocSlug[];
   for (const slug of slugs) {
     const raw = langDocs[slug] ?? enDocs[slug] ?? '';
-    const content = stripFrontmatter(raw);
+    // Match against the whitespace-collapsed source so a phrase broken across a
+    // source line wrap is still found; the snippet is cut from the same string
+    // so its offsets line up with the match.
+    const content = collapseWhitespace(stripFrontmatter(raw));
     const lowerContent = content.toLowerCase();
     const idx = lowerContent.indexOf(lowerQuery);
     if (idx !== -1) {
       // Extract snippet around match
       const start = Math.max(0, idx - 30);
-      const end = Math.min(content.length, idx + query.length + 60);
-      let snippet = content.slice(start, end).replace(/[#*_`[\]()]/g, '').replace(/\n/g, ' ').trim();
+      const end = Math.min(content.length, idx + lowerQuery.length + 60);
+      let snippet = content.slice(start, end).replace(/[#*_`[\]()]/g, '').trim();
       if (start > 0) snippet = '...' + snippet;
       if (end < content.length) snippet = snippet + '...';
       const title = getDocTitle(slug, language);

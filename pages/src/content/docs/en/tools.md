@@ -330,12 +330,17 @@ When there are no matches, the tool returns the literal string
 
 ### Limits
 
-- Caps matches at **100 per file** via `git grep --max-count 100`, so
-  total output across many files can exceed 100. When the per-file cap
-  is hit the output is prefixed with `Note: The results have been
-  truncated. Only showing first 100 results.`.
-- Empty / whitespace-only `search_text` returns `Error: search_text is
-  blank` instead of expanding to every line.
+- Caps output at **100 result lines in total**. `git grep --max-count` is a
+  per-file limit, so the provider asks git for one row more than the cap per
+  file and keeps only the first 100 lines across all files; when more than
+  100 lines came back the output is prefixed with `Note: The results have
+  been truncated. Only showing first 100 results.`.
+- Rejects a `search_text` it cannot hand to git in-process, returning an
+  error string without running a search: empty / whitespace-only gives
+  `Error: search_text is blank` instead of expanding to every line, one
+  containing a NUL byte gives `Error: search_text contains invalid
+  characters`, and one longer than **16 KiB** gives `Error: search_text
+  is too long`.
 - Searches the **current working tree** in workspace mode, or the
   resolved target ref in range / commit mode (the `FileReader.Ref` is
   passed as a positional argument to `git grep`).
@@ -362,7 +367,7 @@ disabling (via `--tools`) safe.
 
 Two paths to extend:
 
-### 1. Disable a tool
+### 1. Disable a tool {#disable-a-tool}
 
 Copy `tools.json`, drop the entry you don't want, then run:
 
@@ -373,7 +378,7 @@ ocr review --tools ./my-tools.json
 For example, if you want a "comment-only" reviewer that never reads
 extra context, keep only `code_comment` and `task_done`.
 
-### 2. Re-describe a tool
+### 2. Re-describe a tool {#re-describe-a-tool}
 
 Keep the `name` (the providers are looked up by name internally) but
 change the `description` to nudge the model. This is the easiest way to

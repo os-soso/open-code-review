@@ -17,6 +17,16 @@ import (
 const (
 	gitGrepMaxCount = 100
 	gitGrepTimeout  = 10 * time.Second
+
+	// Longest search_text that can be handed to git as a single argv entry.
+	// The limit is a platform property, not a git one: Linux rejects an
+	// argument above 128 KiB (MAX_ARG_STRLEN) with "argument list too long"
+	// and Windows caps the whole command line at 32767 characters. git also
+	// echoes the pattern back verbatim in its own "-e option" diagnostics, so
+	// an unbounded pattern would return an unbounded error string as well.
+	// The bound is in bytes because that is what an argv entry counts, and
+	// 16 KiB is far beyond any real search term.
+	gitGrepMaxSearchTextBytes = 16 * 1024
 )
 
 // CodeSearchProvider performs text search across the repository using git grep.
@@ -76,7 +86,10 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 	}
 
 	cmdArgs = append(cmdArgs, "-n", "--no-color")
-	cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", gitGrepMaxCount))
+	// Ask for one row more than the cap per file: --max-count is a PER-FILE
+	// limit, so gitGrep enforces the total itself and uses the extra row to
+	// tell a genuinely truncated result from exactly gitGrepMaxCount matches.
+	cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", gitGrepMaxCount+1))
 
 	cmdArgs = append(cmdArgs, "-e", searchText)
 
@@ -139,6 +152,24 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		return "Error: ref must not start with '-'", nil
 	}
 
+	// git is started with an argv and never through a shell, so the pattern
+	// needs no quoting - but two shapes cannot cross the process boundary at
+	// all, and letting them try surfaces an os/exec failure that names
+	// absolute host paths (the resolved git binary, the repository directory)
+	// instead of anything the model can act on. Reject them here, in the same
+	// "Error: ..." result-string-with-nil-error form the ref guard above and
+	// the blank-search_text guard in Execute use.
+	if strings.Contains(searchText, "\x00") {
+		// NUL is the one byte an argv entry cannot carry: os/exec rejects the
+		// whole command with "invalid argument" before git is started. Tabs
+		// and newlines are deliberately left alone - git reads a
+		// newline-separated -e value as several patterns, which is valid.
+		return "Error: search_text contains invalid characters", nil
+	}
+	if len(searchText) > gitGrepMaxSearchTextBytes {
+		return "Error: search_text is too long", nil
+	}
+
 	outStr, errStr, err := p.runGitGrep(ctx, cmdArgs)
 
 	// Non-git directory: `git grep` exits 128 with "not a git repository".
@@ -168,6 +199,15 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 			}
 			trimmedErr := trimGitUsage(errStr, exitCode)
 			if trimmedErr == "" {
+				if exitErr == nil {
+					// git never ran - os/exec could not start it, or RepoDir
+					// does not exist - so there is no git diagnostic to pass
+					// on and the Go error text is all that is left. That text
+					// embeds absolute host paths, so report a fixed message
+					// rather than wrapping it. Errors from a git that did run
+					// keep flowing below, including its own "fatal:" lines.
+					return "", errors.New("git grep failed to start")
+				}
 				return "", fmt.Errorf("git grep failed: %w", err)
 			}
 			return "", fmt.Errorf("git grep failed: %w: %s", err, trimmedErr)
@@ -175,7 +215,12 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	}
 
 	lines := strings.Split(strings.TrimRight(outStr, "\n"), "\n")
-	truncated := len(lines) >= gitGrepMaxCount
+	// --max-count above is per file, so the total is bounded here: anything
+	// beyond gitGrepMaxCount rows is dropped and flagged in the note below.
+	truncated := len(lines) > gitGrepMaxCount
+	if truncated {
+		lines = lines[:gitGrepMaxCount]
+	}
 
 	type match struct {
 		lineNum int
@@ -184,6 +229,13 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	fileMatches := make(map[string][]match)
 	var fileOrder []string
 	seen := make(map[string]bool)
+
+	// Rows git prints that carry no parsable line number: a binary-file
+	// notice ("Binary file blob.bin matches") has none at all, and a path
+	// containing ':' shifts the colon-separated fields so the number lands in
+	// the wrong one. Neither can be formatted as a "<lineNum>|<content>" row,
+	// so the loop below keeps them aside instead of discarding them outright.
+	var unformattable []string
 
 	hasRef := p.FileReader.Ref != ""
 	splitN := 3
@@ -204,12 +256,14 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		}
 		parts := strings.SplitN(line, ":", splitN)
 		if len(parts) < splitN {
+			unformattable = append(unformattable, line)
 			continue
 		}
 		fname := parts[offset]
 		m := match{}
 		ln, parseErr := strconv.Atoi(parts[offset+1])
 		if parseErr != nil {
+			unformattable = append(unformattable, line)
 			continue
 		}
 		m.lineNum = ln
@@ -230,8 +284,33 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		sb.WriteString("\n")
 	}
 
+	// A search whose every row was unformattable used to answer with an empty
+	// string, saying nothing about a search git did answer. Pass git's own
+	// output through verbatim instead: it still names the file, and for a
+	// colon-bearing path the line number and content as well. Rows that
+	// arrived alongside formattable ones are left out, so a normal search
+	// still returns only the documented "<lineNum>|<content>" shape. The
+	// pass-through obeys the same total cap, lines having been sliced to
+	// gitGrepMaxCount above.
+	if len(fileOrder) == 0 && len(unformattable) > 0 {
+		sb.WriteString("Note: git reported these matches in a form this tool cannot format " +
+			"(a binary-file notice, or a path containing ':'). They are shown exactly as git printed them:\n")
+		for _, line := range unformattable {
+			sb.WriteString(line + "\n")
+		}
+		sb.WriteString("\n")
+	}
+
 	if err != nil && errStr != "" {
 		sb.WriteString(fmt.Sprintf("Warning: %s\n", strings.TrimSpace(errStr)))
+	}
+
+	if sb.Len() == 0 {
+		// git exited without an error and without a single result line, so
+		// there is nothing to format and nothing to pass on. Say that in the
+		// same words the exit-1 path above uses, rather than handing back an
+		// empty string the model cannot interpret.
+		return "No matches found", nil
 	}
 
 	return sb.String(), nil

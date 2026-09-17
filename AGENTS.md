@@ -15,6 +15,20 @@ Below are rules that a contributor must follow during development. If the user d
 7. Do not write overly long commit messages. Important information should go in the PR description rather than in collapsed commit messages.
 8. If you are unwilling or unable to do all of the above, please close your issue or pull request.
 
+## Change Scope Disclosure
+
+- **Keep the change to the scope the task declares.** One logical change per pull request; where an
+  issue, plan or task names the files it expects to touch, that list is the scope.
+- **When the delivered change reaches past that scope, say so — do not leave it to the diff.** List
+  the extra areas in the pull request description under "Change Scope", one line each with the reason
+  it is there, and name the decision taken: the scope was amended and is disclosed there, or the
+  unrelated work was split into its own pull request. A reviewer who is told a change fixes one
+  function and then receives forty files can review neither carefully.
+- **Reverting verified work to make a stale scope statement true is not the remedy** — disclosure is.
+  Where the call is not yours to make, state both options in the description and let a maintainer decide.
+- `.github/pull_request_template.md` collects all of this; CONTRIBUTING.md carries the same duty for
+  human contributors under "Tips for Faster PR Reviews".
+
 ## Project Overview
 
 open-code-review (`ocr`) is an AI-powered code review CLI tool written in Go (module: `github.com/alibaba/open-code-review`).

@@ -67,11 +67,22 @@ const CodeBlock: React.FC<{ label: string; code: string; multiline?: boolean; on
   </div>
 );
 
-const QuickStartSection: React.FC = () => {
+interface QuickStartSectionProps {
+  /** Heading level for the section title. The landing page already opens with
+   *  the hero's h1, so the section stays an h2 there; the standalone /quickstart
+   *  route renders nothing above it and promotes it to that page's only h1. */
+  headingLevel?: 'h1' | 'h2';
+}
+
+const QuickStartSection: React.FC<QuickStartSectionProps> = ({ headingLevel = 'h2' }) => {
   const { t } = useTranslation();
   const { isMobile, isTablet } = useResponsive();
   const titleStyle = useSectionTitleStyle();
   const { toastVisible, handleCopy } = useCopyToast();
+  /* Rendered through a variable tag so the level changes without duplicating
+   * the heading or its styles — the type scale is the section's, not the
+   * element's, so both levels look identical. */
+  const SectionTitle = headingLevel;
 
   return (
     <section
@@ -84,9 +95,9 @@ const QuickStartSection: React.FC = () => {
           <span style={{ color: '#2BDE5E', fontSize: 16, fontWeight: 500, letterSpacing: '0.48px' }}>
             {t('quickstart.sectionLabel')}
           </span>
-          <h2 style={{ color: '#FFFFFF', fontSize: titleStyle.fontSize, fontWeight: 500, textAlign: 'center', lineHeight: titleStyle.lineHeight, letterSpacing: '0.96px', margin: 0, maxWidth: 758 }}>
+          <SectionTitle style={{ color: '#FFFFFF', fontSize: titleStyle.fontSize, fontWeight: 500, textAlign: 'center', lineHeight: titleStyle.lineHeight, letterSpacing: '0.96px', margin: 0, maxWidth: 758 }}>
             {t('quickstart.title')}
-          </h2>
+          </SectionTitle>
           <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16, textAlign: 'center', lineHeight: '24px', margin: 0, maxWidth: 646 }}>
             {t('quickstart.subtitle')}
           </p>

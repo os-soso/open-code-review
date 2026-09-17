@@ -10,7 +10,10 @@ const FeaturesRoutePage: React.FC = () => {
   return (
     <div style={{ paddingTop: 72 }}>
       <FadeInSection>
-        <FeaturesSection />
+        {/* The features section is this route's whole subject, so its title is
+            the page's h1. On the landing page the same section keeps its h2
+            below the hero's h1. */}
+        <FeaturesSection headingLevel="h1" />
       </FadeInSection>
       <FadeInSection>
         <Footer />

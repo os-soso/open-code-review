@@ -9,7 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -307,6 +309,118 @@ func TestGitGrep_PerlRegexp_InvalidPattern_ReturnsError(t *testing.T) {
 	}
 }
 
+// TestGitGrep_RejectsUnusableSearchText pins the argv-boundary guard. A NUL
+// byte and an over-long pattern cannot be handed to git at all - os/exec
+// rejects the first outright and the platform rejects the second as an
+// over-long argument - and letting either reach the process surfaced a raw
+// os/exec error naming absolute host paths. Both are refused in-process
+// instead, as an "Error: ..." result string with a nil error, which is the
+// same graceful shape the blank-search_text and option-like-ref guards use.
+func TestGitGrep_RejectsUnusableSearchText(t *testing.T) {
+	tests := []struct {
+		name       string
+		searchText string
+		want       string
+	}{
+		{
+			name:       "nul byte",
+			searchText: "Hello\x00world",
+			want:       "Error: search_text contains invalid characters",
+		},
+		{
+			name:       "one byte past the length cap",
+			searchText: strings.Repeat("a", gitGrepMaxSearchTextBytes+1),
+			want:       "Error: search_text is too long",
+		},
+		{
+			name:       "a 128 KiB pattern",
+			searchText: strings.Repeat("a", 131072),
+			want:       "Error: search_text is too long",
+		},
+		{
+			name:       "a 1 MiB pattern",
+			searchText: strings.Repeat("a", 1048576),
+			want:       "Error: search_text is too long",
+		},
+	}
+
+	dir := setupTestRepo(t)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+			result, err := p.gitGrep(context.Background(), tt.searchText, true, false, nil)
+			if err != nil {
+				t.Fatalf("expected the rejection as a result string with a nil error, got: %v", err)
+			}
+			if result != tt.want {
+				t.Errorf("gitGrep() = %q, want %q", result, tt.want)
+			}
+		})
+	}
+}
+
+// TestGitGrep_AcceptsSearchTextAtLengthCap pins the length guard's boundary: a
+// pattern of exactly gitGrepMaxSearchTextBytes is still handed to git. It
+// asserts only that the guard did not fire and that git was started, because
+// whether a particular platform can carry a 16 KiB argv entry is a property of
+// that platform rather than a contract of this guard.
+func TestGitGrep_AcceptsSearchTextAtLengthCap(t *testing.T) {
+	dir := setupTestRepo(t)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+
+	result, err := p.gitGrep(context.Background(), strings.Repeat("a", gitGrepMaxSearchTextBytes), true, false, nil)
+	if result == "Error: search_text is too long" {
+		t.Errorf("a pattern of exactly %d bytes must not be rejected as too long", gitGrepMaxSearchTextBytes)
+	}
+	if err != nil && strings.Contains(err.Error(), "git grep failed to start") {
+		t.Errorf("git was not started for a pattern at the length cap: %v", err)
+	}
+}
+
+// TestGitGrep_ExecFailureDoesNotLeakHostPaths pins the error text for the case
+// where git never ran. os/exec names the resolved git binary or the repository
+// directory in its own message ("chdir /abs/path: no such file or directory"),
+// and that absolute host path must not reach the model, so gitGrep reports a
+// fixed message instead of wrapping the Go error.
+func TestGitGrep_ExecFailureDoesNotLeakHostPaths(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does", "not", "exist")
+	p := NewCodeSearch(&FileReader{RepoDir: missing, Ref: "", Mode: ModeWorkspace})
+
+	result, err := p.gitGrep(context.Background(), "Hello", false, false, nil)
+	if err == nil {
+		t.Fatal("expected an error when the repository directory does not exist")
+	}
+	if result != "" {
+		t.Errorf("expected an empty result when git could not be started, got: %s", result)
+	}
+	if got := err.Error(); got != "git grep failed to start" {
+		t.Errorf("err = %q, want %q", got, "git grep failed to start")
+	}
+	if strings.Contains(err.Error(), missing) {
+		t.Errorf("error text leaks the absolute repository path: %s", err.Error())
+	}
+}
+
+// TestGitGrep_GitDiagnosticStillReachesTheCaller pins the other half of that
+// contract: when git did run and explained the failure itself, its trimmed
+// stderr must still reach the caller. The assertion is on the prefix rather
+// than on the word "fatal", which git translates; "exit status 128" comes from
+// os/exec and is locale-independent, and the trailing ": " proves a diagnostic
+// was appended rather than the fixed no-start message being used.
+func TestGitGrep_GitDiagnosticStillReachesTheCaller(t *testing.T) {
+	dir := setupTestRepo(t)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "nonexistent_ref_abc123", Mode: ModeCommit})
+
+	_, err := p.gitGrep(context.Background(), "Hello", false, false, nil)
+	if err == nil {
+		t.Fatal("expected an invalid ref to return an error")
+	}
+	const wrapOnly = "git grep failed: exit status 128"
+	if got := err.Error(); !strings.HasPrefix(got, wrapOnly+": ") {
+		t.Errorf("expected git's own diagnostic appended after %q, got: %v", wrapOnly, got)
+	}
+}
+
 func TestTrimGitUsage(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -405,6 +519,223 @@ func TestGitGrep_WorkspaceMode_UntrackedFile(t *testing.T) {
 	}
 }
 
+// TestBuildGrepArgs_MaxCountLookahead pins the one-row lookahead in the
+// --max-count argument: git's --max-count limits matches PER FILE, not in
+// total, so gitGrep enforces the total cap itself and asks git for one row
+// beyond gitGrepMaxCount per file to tell a genuinely truncated result from
+// exactly gitGrepMaxCount matches.
+func TestBuildGrepArgs_MaxCountLookahead(t *testing.T) {
+	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
+	args := p.buildGrepArgs("foo", false, false, false, nil)
+
+	assertContainsInOrder(t, args, "--max-count", strconv.Itoa(gitGrepMaxCount+1))
+}
+
+// countMatchLines counts the result rows of a gitGrep result, i.e. the
+// "<lineNum>|<content>" lines. The "File:" and "Match lines:" headers, the
+// truncation note and the blank separators between file blocks carry no line
+// number before a '|' and are therefore not counted.
+func countMatchLines(t *testing.T, result string) int {
+	t.Helper()
+	count := 0
+	for _, line := range strings.Split(result, "\n") {
+		pipe := strings.Index(line, "|")
+		if pipe < 0 {
+			continue
+		}
+		if _, err := strconv.Atoi(line[:pipe]); err != nil {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+// TestGitGrep_CapsTotalResultsAcrossFiles verifies the total-result contract:
+// gitGrep emits at most gitGrepMaxCount rows however many files a pattern
+// matched in, and prefixes the truncation note exactly when the raw output
+// exceeded that cap. The cap is the provider's to enforce because --max-count
+// bounds matches per file, not in total, and the one-row lookahead is what
+// separates a genuinely truncated result from exactly gitGrepMaxCount matches.
+func TestGitGrep_CapsTotalResultsAcrossFiles(t *testing.T) {
+	tests := []struct {
+		name      string
+		files     int
+		hitsPer   int
+		wantLines int
+		wantNote  bool
+	}{
+		{
+			name:      "three files of sixty hits are capped at one hundred",
+			files:     3,
+			hitsPer:   60,
+			wantLines: gitGrepMaxCount,
+			wantNote:  true,
+		},
+		{
+			name:      "exactly one hundred hits in one file pass through without a note",
+			files:     1,
+			hitsPer:   gitGrepMaxCount,
+			wantLines: gitGrepMaxCount,
+			wantNote:  false,
+		},
+		{
+			name:      "one hundred and one hits in one file are capped with a note",
+			files:     1,
+			hitsPer:   gitGrepMaxCount + 1,
+			wantLines: gitGrepMaxCount,
+			wantNote:  true,
+		},
+		{
+			name:      "forty hits across two files pass through without a note",
+			files:     2,
+			hitsPer:   20,
+			wantLines: 40,
+			wantNote:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := setupTestRepo(t)
+			// The needle files stay untracked on purpose: workspace mode
+			// reaches them through --untracked, and "needle" matches nothing
+			// in the committed fixtures, so the totals asserted below are
+			// exactly files x hitsPer.
+			for i := 0; i < tt.files; i++ {
+				path := filepath.Join(dir, "needle"+strconv.Itoa(i)+".txt")
+				if err := os.WriteFile(path, []byte(strings.Repeat("needle line\n", tt.hitsPer)), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+			result, err := p.gitGrep(context.Background(), "needle", true, false, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if got := countMatchLines(t, result); got != tt.wantLines {
+				t.Errorf("emitted %d match lines, want %d", got, tt.wantLines)
+			}
+			hasNote := strings.HasPrefix(result, "Note: The results have been truncated.")
+			if hasNote != tt.wantNote {
+				t.Errorf("truncation note present = %v, want %v; output:\n%s", hasNote, tt.wantNote, result)
+			}
+		})
+	}
+}
+
+// TestGitGrep_UnformattableRowsAreReportedVerbatim pins what becomes of rows
+// git prints that carry no parsable line number: a binary-file notice has none
+// at all, and a path containing ':' shifts the colon-separated fields so the
+// number lands in the wrong one. Neither can be formatted as a
+// "<lineNum>|<content>" row, so a search whose every row is of that shape
+// passes git's own output through instead of answering with an empty string.
+// A search that did produce formattable rows keeps the grouped
+// "File:"/"Match lines:" shape and says nothing extra.
+func TestGitGrep_UnformattableRowsAreReportedVerbatim(t *testing.T) {
+	const passThroughNote = "Note: git reported these matches in a form this tool cannot format"
+
+	tests := []struct {
+		name           string
+		fileName       string
+		content        []byte
+		commitMode     bool
+		wantSubstrings []string
+		wantNote       bool
+		wantRows       int
+	}{
+		{
+			name:           "a binary-only match is answered with git's binary-file notice",
+			fileName:       "blob.bin",
+			content:        []byte("needle line\n\x00\x01\x02binary payload\n"),
+			wantSubstrings: []string{"Binary file blob.bin matches"},
+			wantNote:       true,
+			wantRows:       0,
+		},
+		{
+			name:           "a colon-bearing path is answered as git printed it",
+			fileName:       "wei:rd.txt",
+			content:        []byte("needle line\nneedle line\n"),
+			wantSubstrings: []string{"wei:rd.txt:1:needle line", "wei:rd.txt:2:needle line"},
+			wantNote:       true,
+			wantRows:       0,
+		},
+		{
+			name:           "a colon-bearing path is answered in commit mode too",
+			fileName:       "wei:rd.txt",
+			content:        []byte("needle line\nneedle line\n"),
+			commitMode:     true,
+			wantSubstrings: []string{"wei:rd.txt:1:needle line", "wei:rd.txt:2:needle line"},
+			wantNote:       true,
+			wantRows:       0,
+		},
+		{
+			name:           "a formattable match keeps the grouped result shape",
+			fileName:       "needle.txt",
+			content:        []byte("needle line\nneedle line\n"),
+			wantSubstrings: []string{"File: needle.txt", "Match lines: 2", "1|needle line", "2|needle line"},
+			wantNote:       false,
+			wantRows:       2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if strings.Contains(tt.fileName, ":") && runtime.GOOS == "windows" {
+				// Windows reserves ':' for drive letters and alternate data
+				// streams, so a path containing one cannot exist there and git
+				// can never print this row shape on that platform.
+				t.Skip("a path containing ':' cannot exist on Windows")
+			}
+
+			dir := setupTestRepo(t)
+			if err := os.WriteFile(filepath.Join(dir, tt.fileName), tt.content, 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			ref := ""
+			mode := ModeWorkspace
+			if tt.commitMode {
+				// Commit mode searches a ref, so the fixture has to be in it;
+				// git then prefixes every row with "<ref>:", which is the
+				// four-part row shape.
+				for _, args := range [][]string{{"add", "-A"}, {"commit", "-m", "fixture"}} {
+					cmd := exec.Command("git", args...)
+					cmd.Dir = dir
+					if out, cmdErr := cmd.CombinedOutput(); cmdErr != nil {
+						t.Fatalf("git %v: %v\n%s", args, cmdErr, out)
+					}
+				}
+				ref = getHeadCommit(t, dir)
+				mode = ModeCommit
+			}
+
+			p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: ref, Mode: mode})
+			result, err := p.gitGrep(context.Background(), "needle", true, false, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if result == "" {
+				t.Fatal("result is empty: a search git answered must not come back as an empty string")
+			}
+			for _, want := range tt.wantSubstrings {
+				if !strings.Contains(result, want) {
+					t.Errorf("result is missing %q; output:\n%s", want, result)
+				}
+			}
+			if hasNote := strings.Contains(result, passThroughNote); hasNote != tt.wantNote {
+				t.Errorf("pass-through note present = %v, want %v; output:\n%s", hasNote, tt.wantNote, result)
+			}
+			if got := countMatchLines(t, result); got != tt.wantRows {
+				t.Errorf("emitted %d formatted match lines, want %d", got, tt.wantRows)
+			}
+		})
+	}
+}
+
 // TestGitGrep_NonGitDirectoryFallback verifies code_search works in a plain
 // (non-git) directory by retrying git grep in --no-index mode instead of
 // failing with git's exit 128, while still honoring .gitignore.
@@ -472,6 +803,34 @@ func TestCodeSearchProvider_Execute_BlankSearchText(t *testing.T) {
 	}
 	if got != "Error: search_text is blank" {
 		t.Errorf("Execute() = %q, want blank error", got)
+	}
+}
+
+// TestCodeSearchProvider_Execute_RejectsUnusableSearchText checks the same two
+// guards through the tool's own front door, the shape an LLM tool call takes
+// (a NUL byte arrives from JSON as "\u0000"): both must come back as an
+// "Error: ..." result string with a nil error, like the blank-search_text
+// case, rather than as a Go error propagated out of Execute.
+func TestCodeSearchProvider_Execute_RejectsUnusableSearchText(t *testing.T) {
+	dir := setupTestRepo(t)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+
+	got, err := p.Execute(context.Background(), map[string]any{"search_text": "Hello\x00world"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "Error: search_text contains invalid characters" {
+		t.Errorf("Execute() = %q, want the invalid-characters error", got)
+	}
+
+	got, err = p.Execute(context.Background(), map[string]any{
+		"search_text": strings.Repeat("a", gitGrepMaxSearchTextBytes+1),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "Error: search_text is too long" {
+		t.Errorf("Execute() = %q, want the too-long error", got)
 	}
 }
 

@@ -11,6 +11,10 @@ import { describe, it, expect } from 'vitest';
 // so anything not inlined here has no effect until the last chunk executes.
 // Nothing else in the build depends on the block, which makes it easy to delete
 // by accident during an unrelated <head> edit — hence these assertions.
+// The other half of the suite is the head's freedom from third-party hosts: two
+// CDN stylesheets were once linked here and rendered nothing, so the page failed
+// and logged console errors wherever egress to them was unavailable. Nothing in
+// the build fails when a <link> to a CDN is added, so these cases do.
 // Resolved from this file rather than process.cwd() so the test does not depend
 // on where vitest was invoked from. Deliberately not `new URL('../index.html',
 // import.meta.url)`: Vite rewrites that exact pattern into an asset URL, which
@@ -27,9 +31,10 @@ const markup = html.split(/<!--[\s\S]*?-->/).join('');
 
 const inlineStyle = markup.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
 
-// Everything before <noscript>: the copies inside it are deliberately
-// render-blocking and would otherwise look like the bug this guards against.
-const headBeforeNoscript = markup.slice(0, markup.indexOf('<noscript>'));
+// Every <link> the document declares, comments excluded. The head deliberately
+// carries no third-party sheet any more, so the cases below assert over this
+// list rather than over a prose mention of a tag.
+const links = markup.match(/<link\b[^>]*>/g) ?? [];
 
 /** background-color / color out of a `body { ... }` block. */
 function bodyColors(css: string): { bg?: string; fg?: string } {
@@ -41,7 +46,7 @@ function bodyColors(css: string): { bg?: string; fg?: string } {
   };
 }
 
-describe('index.html critical CSS', () => {
+describe('index.html critical CSS and external dependencies', () => {
   const cases: { name: string; assert: () => void }[] = [
     {
       name: 'inlines a <style> block',
@@ -66,28 +71,33 @@ describe('index.html critical CSS', () => {
       },
     },
     {
-      // Critical CSS is pointless while the browser is still blocked on two CDN
-      // round-trips, so the links must not be render-blocking.
-      name: 'loads both CDN stylesheets without blocking first paint',
+      // This head used to link a Google Fonts sheet (Inter + JetBrains Mono)
+      // and cdnjs Font Awesome. No element on any route resolved to either
+      // family and none carried a Font Awesome class, so all they produced was
+      // two cross-origin round-trips per route — and, wherever those hosts are
+      // unreachable, two failed requests and two console errors on a page that
+      // is otherwise completely silent. Anything the site really needs belongs
+      // in the bundle, so no <link> may point off-origin.
+      name: 'links no stylesheet or asset from a third-party host',
+      assert: () => expect(links.filter((link) => /href="(?:https?:)?\/\//.test(link))).toEqual([]),
+    },
+    {
+      // Belt to the braces above: catches the retired hosts wherever they might
+      // reappear, including inside a <noscript> copy or an @import.
+      name: 'names none of the retired font and icon CDNs',
       assert: () => {
-        const links = headBeforeNoscript.match(/<link[^>]*rel="stylesheet"[^>]*>/g) ?? [];
-        expect(links).toHaveLength(2);
-        for (const link of links) {
-          expect(link).toMatch(/media="print"/);
-          expect(link).toMatch(/onload="this\.media='all'"/);
+        for (const host of ['fonts.googleapis.com', 'fonts.gstatic.com', 'cdnjs.cloudflare.com']) {
+          expect(markup).not.toContain(host);
         }
       },
     },
     {
-      // The onload swap cannot run with scripting off, so without these the
-      // no-JS experience would lose fonts and icons entirely.
-      name: 'falls back to blocking stylesheets when scripting is off',
-      assert: () => {
-        const noscript = markup.match(/<noscript>([\s\S]*?)<\/noscript>/)?.[1] ?? '';
-        expect(noscript).toContain('fonts.googleapis.com');
-        expect(noscript).toContain('font-awesome');
-        expect(noscript).not.toMatch(/media="print"/);
-      },
+      // A connection hint only repays its DNS and TLS cost for a host the page
+      // goes on to use; with no third-party host left, one would warm a
+      // connection nothing ever opens.
+      name: 'carries no connection hint to a host it does not use',
+      assert: () =>
+        expect(links.filter((link) => /rel="(?:preconnect|dns-prefetch)"/.test(link))).toEqual([]),
     },
     {
       name: 'shows the boot indicator only while #root is empty',
@@ -105,14 +115,15 @@ describe('index.html critical CSS', () => {
       },
     },
     {
-      name: 'comes before the first external stylesheet',
-      // Critical CSS that loses this race is not critical CSS.
+      // Critical CSS that loses the race to an external sheet is not critical
+      // CSS. It cannot lose a race that does not exist: this block is the only
+      // stylesheet the document declares, and the <noscript> copies that used
+      // to be render-blocking by design are gone with the sheets they mirrored.
+      name: 'is the only stylesheet the document declares',
       assert: () => {
-        const style = markup.indexOf('<style>');
-        const link = headBeforeNoscript.search(/<link[^>]*rel="stylesheet"/);
-        expect(style).toBeGreaterThan(-1);
-        expect(link).toBeGreaterThan(-1);
-        expect(style).toBeLessThan(link);
+        expect(markup).toMatch(/<style>/);
+        expect(markup).not.toMatch(/rel="stylesheet"/);
+        expect(markup).not.toContain('<noscript>');
       },
     },
   ];
